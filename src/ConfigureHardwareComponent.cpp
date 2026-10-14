@@ -11,6 +11,7 @@
 #include "isobus/utility/to_string.hpp"
 
 #ifdef JUCE_WINDOWS
+#include "isobus/hardware_integration/proemion_canlink_interface.hpp"
 #include "isobus/hardware_integration/toucan_vscp_canal.hpp"
 #elif JUCE_LINUX
 #include "isobus/hardware_integration/socket_can_interface.hpp"
@@ -30,9 +31,9 @@ ConfigureHardwareComponent::ConfigureHardwareComponent(ConfigureHardwareWindow &
 	hardwareInterfaceSelector.setTextWhenNothingSelected("Select Hardware Interface");
 
 #ifdef ISOBUS_WINDOWSINNOMAKERUSB2CAN_AVAILABLE
-	hardwareInterfaceSelector.addItemList({ "PEAK PCAN USB", "Innomaker2CAN", "TouCAN", "SysTec" }, 1);
+	hardwareInterfaceSelector.addItemList({ "PEAK PCAN USB", "Innomaker2CAN", "TouCAN", "SysTec", "Proemion CANlink (WiFi)" }, 1);
 #else
-	hardwareInterfaceSelector.addItemList({ "PEAK PCAN USB", "Innomaker2CAN (not supported with mingw)", "TouCAN", "SysTec" }, 1);
+	hardwareInterfaceSelector.addItemList({ "PEAK PCAN USB", "Innomaker2CAN (not supported with mingw)", "TouCAN", "SysTec", "Proemion CANlink (WiFi)" }, 1);
 #endif
 	int selectedID = 1;
 
@@ -49,14 +50,8 @@ ConfigureHardwareComponent::ConfigureHardwareComponent(ConfigureHardwareWindow &
 	hardwareInterfaceSelector.setSize(getWidth() - 20, 30);
 	hardwareInterfaceSelector.setTopLeftPosition(10, 80);
 	hardwareInterfaceSelector.onChange = [this]() {
-		if (3 == hardwareInterfaceSelector.getSelectedId())
-		{
-			touCANSerialEditor.setVisible(true);
-		}
-		else
-		{
-			touCANSerialEditor.setVisible(false);
-		}
+		touCANSerialEditor.setVisible(3 == hardwareInterfaceSelector.getSelectedId());
+		proemionAddressEditor.setVisible(5 == hardwareInterfaceSelector.getSelectedId());
 		repaint();
 	};
 	addAndMakeVisible(hardwareInterfaceSelector);
@@ -68,6 +63,16 @@ ConfigureHardwareComponent::ConfigureHardwareComponent(ConfigureHardwareWindow &
 	touCANSerialEditor.setTopLeftPosition(10, 140);
 	touCANSerialEditor.setInputFilter(inputFilter, true);
 	addChildComponent(touCANSerialEditor);
+
+	proemionAddressEditor.setName("Proemion CANlink Address");
+	proemionAddressEditor.setText(std::static_pointer_cast<isobus::ProemionCANLinkInterface>(parentCANDrivers.at(4))->get_interface());
+	proemionAddressEditor.setTextToShowWhenEmpty("IP address, optionally with :port (default port 30000)", getLookAndFeel().findColour(TextEditor::textColourId).withAlpha(0.5f));
+	proemionAddressEditor.setSize(getWidth() - 20, 30);
+	proemionAddressEditor.setTopLeftPosition(10, 140);
+	proemionAddressEditor.setInputFilter(new TextEditor::LengthAndCharacterRestriction(64, "0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ.-:"), true);
+	addChildComponent(proemionAddressEditor);
+	proemionAddressEditor.setVisible(5 == selectedID);
+	touCANSerialEditor.setVisible(3 == selectedID);
 #elif JUCE_LINUX
 	socketCANNameEditor.setName("SocketCAN Interface Name");
 	socketCANNameEditor.setText(std::static_pointer_cast<isobus::SocketCANInterface>(parentCANDrivers.at(0))->get_device_name());
@@ -81,6 +86,10 @@ ConfigureHardwareComponent::ConfigureHardwareComponent(ConfigureHardwareWindow &
 		{
 			int serial = touCANSerialEditor.getText().trim().getIntValue();
 			std::static_pointer_cast<isobus::TouCANPlugin>(parentCANDrivers.at(hardwareInterfaceSelector.getSelectedId() - 1))->reconfigure(0, static_cast<std::uint32_t>(serial));
+		}
+		else if (5 == hardwareInterfaceSelector.getSelectedId()) // Proemion CANlink
+		{
+			std::static_pointer_cast<isobus::ProemionCANLinkInterface>(parentCANDrivers.at(hardwareInterfaceSelector.getSelectedId() - 1))->set_interface(proemionAddressEditor.getText().trim().toStdString());
 		}
 
 		if (nullptr != isobus::CANHardwareInterface::get_assigned_can_channel_frame_handler(0))
@@ -119,6 +128,10 @@ void ConfigureHardwareComponent::paint(Graphics &graphics)
 	if (3 == hardwareInterfaceSelector.getSelectedId())
 	{
 		graphics.drawFittedText("TouCAN Serial Number", touCANSerialEditor.getBounds().getX(), touCANSerialEditor.getBounds().getY() - 14, touCANSerialEditor.getBounds().getWidth(), 12, Justification::centredLeft, 1);
+	}
+	else if (5 == hardwareInterfaceSelector.getSelectedId())
+	{
+		graphics.drawFittedText("CANlink IP Address", proemionAddressEditor.getBounds().getX(), proemionAddressEditor.getBounds().getY() - 14, proemionAddressEditor.getBounds().getWidth(), 12, Justification::centredLeft, 1);
 	}
 #elif JUCE_LINUX
 	graphics.drawFittedText("Socket CAN Interface Name", socketCANNameEditor.getBounds().getX(), socketCANNameEditor.getBounds().getY() - 14, socketCANNameEditor.getBounds().getWidth(), 12, Justification::centredLeft, 1);
