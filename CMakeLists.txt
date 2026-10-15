@@ -3,7 +3,7 @@ cmake_minimum_required(VERSION 3.16)
 project(
   "AgISOVirtualTerminal"
   LANGUAGES CXX C
-  VERSION 1.5.1)
+  VERSION 1.6.0)
 
 list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_LIST_DIR}/cmake")
 
@@ -92,6 +92,7 @@ target_sources(
           "src/OutputNumberComponent.cpp"
           "src/SoftkeyMaskRenderArea.cpp"
           "src/KeyComponent.cpp"
+          "src/DesignatorFit.cpp"
           "src/SoftKeyMaskComponent.cpp"
           "src/OutputMeterComponent.cpp"
           "src/InputBooleanComponent.cpp"
