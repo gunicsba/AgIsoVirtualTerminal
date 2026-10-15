@@ -17,6 +17,7 @@
 #include "SoftKeyMaskRenderAreaComponent.hpp"
 
 #ifdef JUCE_WINDOWS
+#include "isobus/hardware_integration/proemion_canlink_interface.hpp"
 #include "isobus/hardware_integration/toucan_vscp_canal.hpp"
 #elif JUCE_LINUX
 #include "isobus/hardware_integration/socket_can_interface.hpp"
@@ -2002,6 +2003,11 @@ void ServerMainComponent::check_load_settings(std::shared_ptr<ValueTree> setting
 				std::static_pointer_cast<isobus::TouCANPlugin>(parentCANDrivers.at(2))->reconfigure(0, static_cast<std::uint32_t>(static_cast<int>(child.getProperty("TouCANSerial"))));
 			}
 
+			if (!child.getProperty("ProemionAddress").isVoid())
+			{
+				std::static_pointer_cast<isobus::ProemionCANLinkInterface>(parentCANDrivers.at(4))->set_interface(child.getProperty("ProemionAddress").toString().toStdString());
+			}
+
 			if (!child.getProperty("CANDriver").isVoid())
 			{
 				auto index = static_cast<std::uint32_t>(static_cast<int>(child.getProperty("CANDriver")));
@@ -2304,6 +2310,7 @@ void ServerMainComponent::save_settings()
 
 #ifdef JUCE_WINDOWS
 		hardwareSettings.setProperty("TouCANSerial", static_cast<int>(std::static_pointer_cast<isobus::TouCANPlugin>(parentCANDrivers.at(2))->get_serial_number()), nullptr);
+		hardwareSettings.setProperty("ProemionAddress", String(std::static_pointer_cast<isobus::ProemionCANLinkInterface>(parentCANDrivers.at(4))->get_interface()), nullptr);
 #elif JUCE_LINUX
 		hardwareSettings.setProperty("SocketCANInterface", String(std::static_pointer_cast<isobus::SocketCANInterface>(parentCANDrivers.at(0))->get_device_name()), nullptr);
 #endif
