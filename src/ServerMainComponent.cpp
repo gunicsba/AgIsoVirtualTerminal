@@ -631,6 +631,12 @@ void ServerMainComponent::timerCallback()
 		}
 		else if (isobus::SystemTiming::time_expired_ms(ws->get_working_set_maintenance_message_timestamp_ms(), 3000) || ws->is_deletion_requested())
 		{
+			if (!ws->is_deletion_requested())
+			{
+				isobus::CANStackLogger::warn("[VT Server]: Dropping client " + std::to_string(ws->get_control_function()->get_address()) +
+				                             ": no working set maintenance message for " +
+				                             std::to_string(isobus::SystemTiming::get_time_elapsed_ms(ws->get_working_set_maintenance_message_timestamp_ms())) + " ms");
+			}
 			managedWorkingSetIopLoadStateMap[ws] = false;
 			dataMaskRenderer.on_working_set_disconnect(ws);
 			softKeyMaskRenderer.on_working_set_disconnect(ws);

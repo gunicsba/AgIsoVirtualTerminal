@@ -81,7 +81,9 @@ void LoggerComponent::sink_CAN_stack_log(LoggingLevel level, const std::string &
 		const std::lock_guard<std::mutex> lock(pendingMessagesMutex);
 		pendingMessages.push_back({ logText, level });
 	}
-	logMessage(logText);
+	// Wall clock time, so the log lines up with CAN traces
+	const auto now = Time::getCurrentTime();
+	logMessage(now.formatted("%H:%M:%S.") + String(now.getMilliseconds()).paddedLeft('0', 3) + " " + logText);
 	triggerAsyncUpdate();
 }
 
