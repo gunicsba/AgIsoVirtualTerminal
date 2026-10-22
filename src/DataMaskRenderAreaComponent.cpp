@@ -4,7 +4,6 @@
 ** @copyright  The Open-Agriculture Developers
 *******************************************************************************/
 #include "DataMaskRenderAreaComponent.hpp"
-#include "DialogFit.hpp"
 
 #include <cmath>
 #include "AppImages.h"
@@ -275,7 +274,7 @@ void DataMaskRenderAreaComponent::mouseUp(const MouseEvent &event)
 								inputListModal.reset();
 								repaint();
 							};
-							show_dialog_inside(*inputListModal, ownerServer);
+							ownerServer.show_dialog(*inputListModal);
 							inputListModal->enterModalState(true, ModalCallbackFunction::create(std::move(resultCallback)), false);
 							if (nullptr != parentWorkingSet)
 							{
@@ -408,7 +407,7 @@ void DataMaskRenderAreaComponent::mouseUp(const MouseEvent &event)
 								}
 								ownerServer.process_macro(clickedNumber, isobus::EventID::OnInputFieldDeselection, isobus::VirtualTerminalObjectType::InputNumber, parentWorkingSet);
 							};
-							show_dialog_inside(*inputNumberModal, ownerServer);
+							ownerServer.show_dialog(*inputNumberModal);
 							inputNumberModal->enterModalState(true, ModalCallbackFunction::create(std::move(resultCallback)), false);
 							inputNumberKeypad->grabKeyboardFocus();
 							ownerServer.send_select_input_object_message(clickedNumber->get_id(), true, true, ownerServer.get_client_control_function_for_working_set(parentWorkingSet));
@@ -531,7 +530,7 @@ void DataMaskRenderAreaComponent::mouseUp(const MouseEvent &event)
 								}
 								ownerServer.process_macro(clickedString, isobus::EventID::OnInputFieldDeselection, isobus::VirtualTerminalObjectType::InputString, parentWorkingSet);
 							};
-							show_dialog_inside(*inputStringModal, ownerServer);
+							ownerServer.show_dialog(*inputStringModal);
 							inputStringModal->enterModalState(true, ModalCallbackFunction::create(std::move(resultCallback)), false);
 							ownerServer.send_select_input_object_message(clickedString->get_id(), true, true, ownerServer.get_client_control_function_for_working_set(parentWorkingSet));
 							if (parentWorkingSet)

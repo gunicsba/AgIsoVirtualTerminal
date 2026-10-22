@@ -168,6 +168,21 @@ public:
 	/// scale when they are fitted to the window
 	void apply_window_size_limits();
 
+	/// @brief Sets the height the masks are fitted into, when this component is taller than what is visible of it,
+	/// such as on Android, where the log is a page below the VT that is scrolled to
+	/// @param[in] height The visible height, or 0 to fit into the component's own height
+	void set_fitting_height(int height);
+
+	/// @brief Returns if the log is shown
+	/// @returns true when the log area is shown
+	bool is_log_shown() const;
+
+	/// @brief Shows a dialog, such as an AlertWindow, on screen. On Android the dialogs cannot scroll and some are
+	/// taller than a phone, so the dialog is shown inside the VT, scaled down until it fits. Elsewhere it stays a window
+	/// of its own and nothing changes.
+	/// @param[in] dialog The dialog, before it enters its modal state
+	void show_dialog(juce::Component &dialog);
+
 private:
 	enum class CommandIDs : int
 	{
@@ -286,6 +301,8 @@ private:
 	MenuBarComponent menuBar;
 	LoggerComponent logger;
 	Viewport loggerViewport;
+	Component dialogStage; ///< On Android the dialogs' parent: tall, so AlertWindow does not cut them to the screen, then scaled to fit
+	int fittingHeight = 0; ///< The height the masks are fitted into, or 0 for the component's own height
 	VT_NumberComponent vtNumberComponent;
 	static constexpr int RESIZE_GRIP_SIZE = 44; ///< Large enough to drag with a finger
 	std::unique_ptr<juce::ResizableCornerComponent> resizeGrip; ///< Replaces the window's 18 pixel corner resizer

@@ -4,7 +4,6 @@
 ** @copyright  The Open-Agriculture Developers
 *******************************************************************************/
 #include "ServerMainComponent.hpp"
-#include "DialogFit.hpp"
 
 #include "ASCIILogFile.hpp"
 
@@ -1006,7 +1005,7 @@ bool ServerMainComponent::perform(const InvocationInfo &info)
 			popupMenu->addTextBlock("This software is licensed under the GPL-3.0. You may use or change this software, even commercially, but you may not include it as part of closed-source software. Refer to this project's GitHub page for more details on your license obligations. Please retain the original copyright statements found in this software.");
 			popupMenu->addTextBlock("This is an ISO11783-6 virtual terminal server application based on AgIsoStack++ and the JUCE framework. This software is intended to be used for testing ISO11783 applications that consume AgIsoStack libraries, and serves as a reference implementation of our VT server files in AgIsoStack++.");
 			popupMenu->addButton("OK", 0, KeyPress(KeyPress::returnKey, 0, 0));
-			show_dialog_inside(*popupMenu, *this);
+			show_dialog(*popupMenu);
 			popupMenu->enterModalState(true, ModalCallbackFunction::create(LanguageCommandConfigClosed{ *this }));
 			retVal = true;
 		}
@@ -1042,7 +1041,7 @@ bool ServerMainComponent::perform(const InvocationInfo &info)
 			popupMenu->getComboBoxComponent("Volume Units")->setSelectedItemIndex(static_cast<int>(languageCommandInterface.get_commanded_volume_units()));
 			popupMenu->addButton("OK", 1, KeyPress(KeyPress::returnKey, 0, 0));
 			popupMenu->addButton("Cancel", 0, KeyPress(KeyPress::escapeKey, 0, 0));
-			show_dialog_inside(*popupMenu, *this);
+			show_dialog(*popupMenu);
 			popupMenu->enterModalState(true, ModalCallbackFunction::create(LanguageCommandConfigClosed{ *this }));
 		}
 		break;
@@ -1054,7 +1053,7 @@ bool ServerMainComponent::perform(const InvocationInfo &info)
 			popupMenu->addButton("OK", 2, KeyPress(KeyPress::returnKey, 0, 0));
 			popupMenu->addButton("Cancel", 0, KeyPress(KeyPress::escapeKey, 0, 0));
 			popupMenu->getComboBoxComponent("Version")->setSelectedItemIndex(static_cast<int>(versionToReport));
-			show_dialog_inside(*popupMenu, *this);
+			show_dialog(*popupMenu);
 			popupMenu->enterModalState(true, ModalCallbackFunction::create(LanguageCommandConfigClosed{ *this }));
 			retVal = true;
 		}
@@ -1079,7 +1078,7 @@ bool ServerMainComponent::perform(const InvocationInfo &info)
 
 			popupMenu->addButton("OK", 3, KeyPress(KeyPress::returnKey, 0, 0));
 			popupMenu->addButton("Cancel", 0, KeyPress(KeyPress::escapeKey, 0, 0));
-			show_dialog_inside(*popupMenu, *this);
+			show_dialog(*popupMenu);
 			popupMenu->enterModalState(true, ModalCallbackFunction::create(LanguageCommandConfigClosed{ *this }));
 			retVal = true;
 		}
@@ -1102,7 +1101,7 @@ bool ServerMainComponent::perform(const InvocationInfo &info)
 			popupMenu->getComboBoxComponent("Save IOP data before parsing")->setSelectedItemIndex(saveIopBeforeParse ? 1 : 0);
 			popupMenu->addButton("OK", 4, KeyPress(KeyPress::returnKey, 0, 0));
 			popupMenu->addButton("Cancel", 0, KeyPress(KeyPress::escapeKey, 0, 0));
-			show_dialog_inside(*popupMenu, *this);
+			show_dialog(*popupMenu);
 			popupMenu->enterModalState(true, ModalCallbackFunction::create(LanguageCommandConfigClosed{ *this }));
 			retVal = true;
 		}
@@ -1111,7 +1110,7 @@ bool ServerMainComponent::perform(const InvocationInfo &info)
 		case static_cast<int>(CommandIDs::ConfigureShortcuts):
 		{
 			popupMenu = std::make_unique<AckSettingsWindow>(alarmAckKeyCode, showAckButton);
-			show_dialog_inside(*popupMenu, *this);
+			show_dialog(*popupMenu);
 			popupMenu->enterModalState(true, ModalCallbackFunction::create(LanguageCommandConfigClosed{ *this }));
 			retVal = true;
 		}
@@ -2613,20 +2612,21 @@ double ServerMainComponent::display_scale() const
 	const int isoWidth = get_data_mask_area_size_x_pixels() + softKeyMaskDimensions.total_width();
 	const int isoHeight = get_data_mask_area_size_y_pixels();
 
-	if ((isoWidth <= 0) || (isoHeight <= 0) || (getWidth() <= 0) || (getHeight() <= 0))
+	const int height = (fittingHeight > 0) ? fittingHeight : getHeight();
+
+	if ((isoWidth <= 0) || (isoHeight <= 0) || (getWidth() <= 0) || (height <= 0))
 	{
 		return 1.0; // Not sized yet
 	}
 
 #if JUCE_ANDROID
-	// A phone or a pop-up window is too short to spare the log its height, so the masks come first
-	// and the log, when shown, gets what is left below them
+	// The log is a page of its own below the VT, scrolled to, so the masks get the whole screen
 	const int loggerReserve = 0;
 #else
 	const int loggerReserve = loggerViewport.isVisible() ? LoggerComponent::HEIGHT : 0;
 #endif
 	const int availableWidth = getWidth() - WorkingSetSelectorComponent::WIDTH;
-	const int availableHeight = getHeight() -
+	const int availableHeight = height -
 	  juce::LookAndFeel::getDefaultLookAndFeel().getDefaultMenuBarHeight() -
 	  loggerReserve;
 
@@ -2665,6 +2665,58 @@ void ServerMainComponent::apply_window_size_limits()
 		frame = peer->getFrameSize();
 	}
 	window->setResizeLimits(minimumWidth + frame.getLeftAndRight(), minimumHeight + frame.getTopAndBottom(), 32768, 32768);
+}
+
+void ServerMainComponent::set_fitting_height(int height)
+{
+	if (fittingHeight != height)
+	{
+		fittingHeight = height;
+		resized();
+	}
+}
+
+bool ServerMainComponent::is_log_shown() const
+{
+	return loggerViewport.isVisible();
+}
+
+void ServerMainComponent::show_dialog(juce::Component &dialog)
+{
+#if JUCE_ANDROID
+	// AlertWindow cuts itself to its parent's height and cannot scroll. In a tall stage it is laid out at its
+	// full height, and the stage is then scaled so the dialog fits what is visible of the VT.
+	constexpr int STAGE_HEIGHT = 4000;
+	dialogStage.setTransform({});
+	dialogStage.setBounds(0, 0, getWidth(), STAGE_HEIGHT);
+	dialogStage.setInterceptsMouseClicks(false, true);
+	addAndMakeVisible(dialogStage);
+	dialogStage.addAndMakeVisible(dialog);
+	dialog.sendLookAndFeelChange(); // Lays the AlertWindow out again, now with the stage's height
+	dialog.setTopLeftPosition((dialogStage.getWidth() - dialog.getWidth()) / 2, 0);
+
+	auto visible = getLocalBounds();
+
+	if (auto *viewport = findParentComponentOfClass<juce::Viewport>())
+	{
+		visible = viewport->getViewArea();
+	}
+
+	const auto area = visible.reduced(8).toFloat();
+	const auto bounds = dialog.getBounds().toFloat();
+
+	if (bounds.isEmpty() || area.isEmpty())
+	{
+		return;
+	}
+
+	const float scale = juce::jmin(1.0f, area.getWidth() / bounds.getWidth(), area.getHeight() / bounds.getHeight());
+	dialogStage.setTransform(juce::AffineTransform::scale(scale)
+	                           .translated(area.getCentreX() - (bounds.getCentreX() * scale),
+	                                       area.getCentreY() - (bounds.getCentreY() * scale)));
+#else
+	juce::ignoreUnused(dialog);
+#endif
 }
 
 double ServerMainComponent::working_set_selector_scale() const
