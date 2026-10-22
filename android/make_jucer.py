@@ -20,6 +20,16 @@ MODULES = ["juce_core", "juce_events", "juce_data_structures", "juce_graphics", 
            "juce_audio_basics", "juce_audio_devices", "juce_audio_formats", "juce_audio_processors", "juce_audio_utils"]
 DEFINES = ["JUCE_WEB_BROWSER=0", "JUCE_USE_CURL=0", "ISOBUS_PROEMION_AVAILABLE=1", "CAN_PORT_MAXIMUM_VALUE=4"]
 
+# VTActivity starts VTService, a foreground service that keeps the VT running while another app is in
+# front. The connectedDevice type needs one of the WiFi permissions on Android 14 and later.
+ACTIVITY = "com.openagriculture.agisovirtualterminal.VTActivity"
+PERMISSIONS = ["android.permission.FOREGROUND_SERVICE", "android.permission.FOREGROUND_SERVICE_CONNECTED_DEVICE",
+               "android.permission.WAKE_LOCK", "android.permission.CHANGE_WIFI_STATE"]
+MANIFEST = ('<manifest><application>'
+            '<service android:name="com.openagriculture.agisovirtualterminal.VTService" android:exported="false"'
+            ' android:foregroundServiceType="connectedDevice"/>'
+            '</application></manifest>')
+
 
 def rel(path, start=HERE):
 	return os.path.relpath(path, start).replace("\\", "/")
@@ -77,7 +87,9 @@ def main():
   <JUCEOPTIONS JUCE_WEB_BROWSER="0" JUCE_USE_CURL="0"/>
   <EXPORTFORMATS>
     <ANDROIDSTUDIO targetFolder="Builds/Android" bigIcon="icon" androidMinimumSDK="24" androidTargetSDK="35"
-                   androidInternetNeeded="1" androidScreenOrientation="landscape" androidVersionCode="1">
+                   androidInternetNeeded="1" androidScreenOrientation="landscape" androidVersionCode="1"
+                   androidActivitySubClassName={activity} androidAdditionalJavaFolders={javafolders}
+                   androidOtherPermissions={permissions} androidManifestCustomXmlElements={manifest}>
       <CONFIGURATIONS>
         <CONFIGURATION isDebug="1" name="Debug" headerPath={headers} androidArchitectures="arm64-v8a armeabi-v7a"/>
         <CONFIGURATION isDebug="0" name="Release" headerPath={headers} optimisation="3" androidArchitectures="arm64-v8a armeabi-v7a"/>
@@ -94,6 +106,11 @@ def main():
 	           stack=file_items(stack_sources(stack), "st"),
 	           modules="\n".join('    <MODULE id="{0}" showAllCode="1" useLocalCopy="0" useGlobalPath="0"/>'.format(m) for m in MODULES),
 	           headers=quoteattr(header_path),
+	           activity=quoteattr(ACTIVITY),
+	           # JUCE only adds its JuceActivity, which VTActivity extends, when its own activity is used
+	           javafolders=quoteattr("java\n" + modules + "/juce_gui_basics/native/javaopt/app"),
+	           permissions=quoteattr(" ".join(PERMISSIONS)),
+	           manifest=quoteattr(MANIFEST),
 	           modulepaths="\n".join('        <MODULEPATH id="{0}" path={1}/>'.format(m, quoteattr(modules)) for m in MODULES))
 
 	with open(os.path.join(HERE, "AgISOVirtualTerminal.jucer"), "w", encoding="utf-8", newline="\n") as out:

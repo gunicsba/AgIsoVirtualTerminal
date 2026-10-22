@@ -4,6 +4,7 @@
 ** @copyright  The Open-Agriculture Developers
 *******************************************************************************/
 #include "ServerMainComponent.hpp"
+#include "DialogFit.hpp"
 
 #include "ASCIILogFile.hpp"
 
@@ -1005,6 +1006,7 @@ bool ServerMainComponent::perform(const InvocationInfo &info)
 			popupMenu->addTextBlock("This software is licensed under the GPL-3.0. You may use or change this software, even commercially, but you may not include it as part of closed-source software. Refer to this project's GitHub page for more details on your license obligations. Please retain the original copyright statements found in this software.");
 			popupMenu->addTextBlock("This is an ISO11783-6 virtual terminal server application based on AgIsoStack++ and the JUCE framework. This software is intended to be used for testing ISO11783 applications that consume AgIsoStack libraries, and serves as a reference implementation of our VT server files in AgIsoStack++.");
 			popupMenu->addButton("OK", 0, KeyPress(KeyPress::returnKey, 0, 0));
+			show_dialog_inside(*popupMenu, *this);
 			popupMenu->enterModalState(true, ModalCallbackFunction::create(LanguageCommandConfigClosed{ *this }));
 			retVal = true;
 		}
@@ -1040,6 +1042,7 @@ bool ServerMainComponent::perform(const InvocationInfo &info)
 			popupMenu->getComboBoxComponent("Volume Units")->setSelectedItemIndex(static_cast<int>(languageCommandInterface.get_commanded_volume_units()));
 			popupMenu->addButton("OK", 1, KeyPress(KeyPress::returnKey, 0, 0));
 			popupMenu->addButton("Cancel", 0, KeyPress(KeyPress::escapeKey, 0, 0));
+			show_dialog_inside(*popupMenu, *this);
 			popupMenu->enterModalState(true, ModalCallbackFunction::create(LanguageCommandConfigClosed{ *this }));
 		}
 		break;
@@ -1051,6 +1054,7 @@ bool ServerMainComponent::perform(const InvocationInfo &info)
 			popupMenu->addButton("OK", 2, KeyPress(KeyPress::returnKey, 0, 0));
 			popupMenu->addButton("Cancel", 0, KeyPress(KeyPress::escapeKey, 0, 0));
 			popupMenu->getComboBoxComponent("Version")->setSelectedItemIndex(static_cast<int>(versionToReport));
+			show_dialog_inside(*popupMenu, *this);
 			popupMenu->enterModalState(true, ModalCallbackFunction::create(LanguageCommandConfigClosed{ *this }));
 			retVal = true;
 		}
@@ -1075,6 +1079,7 @@ bool ServerMainComponent::perform(const InvocationInfo &info)
 
 			popupMenu->addButton("OK", 3, KeyPress(KeyPress::returnKey, 0, 0));
 			popupMenu->addButton("Cancel", 0, KeyPress(KeyPress::escapeKey, 0, 0));
+			show_dialog_inside(*popupMenu, *this);
 			popupMenu->enterModalState(true, ModalCallbackFunction::create(LanguageCommandConfigClosed{ *this }));
 			retVal = true;
 		}
@@ -1097,6 +1102,7 @@ bool ServerMainComponent::perform(const InvocationInfo &info)
 			popupMenu->getComboBoxComponent("Save IOP data before parsing")->setSelectedItemIndex(saveIopBeforeParse ? 1 : 0);
 			popupMenu->addButton("OK", 4, KeyPress(KeyPress::returnKey, 0, 0));
 			popupMenu->addButton("Cancel", 0, KeyPress(KeyPress::escapeKey, 0, 0));
+			show_dialog_inside(*popupMenu, *this);
 			popupMenu->enterModalState(true, ModalCallbackFunction::create(LanguageCommandConfigClosed{ *this }));
 			retVal = true;
 		}
@@ -1105,6 +1111,7 @@ bool ServerMainComponent::perform(const InvocationInfo &info)
 		case static_cast<int>(CommandIDs::ConfigureShortcuts):
 		{
 			popupMenu = std::make_unique<AckSettingsWindow>(alarmAckKeyCode, showAckButton);
+			show_dialog_inside(*popupMenu, *this);
 			popupMenu->enterModalState(true, ModalCallbackFunction::create(LanguageCommandConfigClosed{ *this }));
 			retVal = true;
 		}
@@ -2611,10 +2618,17 @@ double ServerMainComponent::display_scale() const
 		return 1.0; // Not sized yet
 	}
 
+#if JUCE_ANDROID
+	// A phone or a pop-up window is too short to spare the log its height, so the masks come first
+	// and the log, when shown, gets what is left below them
+	const int loggerReserve = 0;
+#else
+	const int loggerReserve = loggerViewport.isVisible() ? LoggerComponent::HEIGHT : 0;
+#endif
 	const int availableWidth = getWidth() - WorkingSetSelectorComponent::WIDTH;
 	const int availableHeight = getHeight() -
 	  juce::LookAndFeel::getDefaultLookAndFeel().getDefaultMenuBarHeight() -
-	  (loggerViewport.isVisible() ? LoggerComponent::HEIGHT : 0);
+	  loggerReserve;
 
 	if ((availableWidth <= 0) || (availableHeight <= 0))
 	{
