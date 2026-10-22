@@ -4,7 +4,6 @@
 ** @copyright  The Open-Agriculture Developers
 *******************************************************************************/
 #include "DataMaskRenderAreaComponent.hpp"
-#include "DialogFit.hpp"
 
 #include <algorithm>
 #include <cmath>
@@ -569,7 +568,7 @@ void DataMaskRenderAreaComponent::mouseUp(const MouseEvent &event)
 								inputListModal.reset();
 								repaint();
 							};
-							show_dialog_inside(*inputListModal, ownerServer);
+							ownerServer.show_dialog(*inputListModal);
 							inputListModal->enterModalState(true, ModalCallbackFunction::create(std::move(resultCallback)), false);
 							begin_open_input(clickedList->get_id());
 							ownerServer.send_select_input_object_message(clickedList->get_id(), true, true, ownerServer.get_client_control_function_for_working_set(parentWorkingSet));
@@ -701,7 +700,7 @@ void DataMaskRenderAreaComponent::mouseUp(const MouseEvent &event)
 								workingSet->set_object_focus(isobus::NULL_OBJECT_ID);
 								ownerServer.process_macro(clickedNumber, isobus::EventID::OnInputFieldDeselection, isobus::VirtualTerminalObjectType::InputNumber, workingSet);
 							};
-							show_dialog_inside(*inputNumberModal, ownerServer);
+							ownerServer.show_dialog(*inputNumberModal);
 							inputNumberModal->enterModalState(true, ModalCallbackFunction::create(std::move(resultCallback)), false);
 							begin_open_input(clickedNumber->get_id());
 							inputNumberKeypad->grabKeyboardFocus();
@@ -834,7 +833,7 @@ void DataMaskRenderAreaComponent::mouseUp(const MouseEvent &event)
 								workingSet->set_object_focus(isobus::NULL_OBJECT_ID);
 								ownerServer.process_macro(clickedString, isobus::EventID::OnInputFieldDeselection, isobus::VirtualTerminalObjectType::InputString, workingSet);
 							};
-							show_dialog_inside(*inputStringModal, ownerServer);
+							ownerServer.show_dialog(*inputStringModal);
 							inputStringModal->enterModalState(true, ModalCallbackFunction::create(std::move(resultCallback)), false);
 							begin_open_input(clickedString->get_id());
 							ownerServer.send_select_input_object_message(clickedString->get_id(), true, true, ownerServer.get_client_control_function_for_working_set(parentWorkingSet));

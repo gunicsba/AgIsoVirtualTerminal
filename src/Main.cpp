@@ -12,17 +12,22 @@
 #if JUCE_ANDROID
 namespace
 {
-	/// Android draws apps under the status bar, the camera cutout and the gesture bar, so the VT is
-	/// laid out inside the display's safe area. The insets can arrive after the first layout, so they
-	/// are checked again now and then.
-	class SafeAreaComponent : public Component
+	/// Holds the VT on Android. The VT is laid out inside the display's safe area, clear of the camera
+	/// cutout, whose insets can arrive after the first layout, so they are checked again now and then.
+	/// When the log is shown it is a page of its own below the VT, reached with the scroll bar. Dragging
+	/// does not scroll, as touches on the masks belong to the implements.
+	class PhoneLayoutComponent : public Component
 	  , private Timer
 	{
 	public:
-		explicit SafeAreaComponent(Component *contentToOwn) :
-		  content(contentToOwn)
+		explicit PhoneLayoutComponent(ServerMainComponent *serverToOwn) :
+		  server(serverToOwn)
 		{
-			addAndMakeVisible(*content);
+			viewport.setViewedComponent(server.get(), false);
+			viewport.setScrollBarsShown(true, false);
+			viewport.setScrollOnDragMode(Viewport::ScrollOnDragMode::never);
+			viewport.setScrollBarThickness(24);
+			addAndMakeVisible(viewport);
 			startTimer(500);
 		}
 
@@ -33,8 +38,7 @@ namespace
 
 		void resized() override
 		{
-			const auto area = safe_area();
-			content->setBounds(area.isEmpty() ? getLocalBounds() : area);
+			lay_out();
 		}
 
 	private:
@@ -49,17 +53,32 @@ namespace
 			return {};
 		}
 
+		void lay_out()
+		{
+			lastSafeArea = safe_area();
+			logShown = server->is_log_shown();
+			viewport.setBounds(lastSafeArea.isEmpty() ? getLocalBounds() : lastSafeArea);
+
+			// The masks fit the screen, the log gets a page of its own below them, and only then is
+			// there a scroll bar, which takes its width from the VT
+			const int visibleHeight = viewport.getHeight();
+			const int width = viewport.getWidth() - (logShown ? viewport.getScrollBarThickness() : 0);
+			server->set_fitting_height(visibleHeight);
+			server->setSize(width, logShown ? (2 * visibleHeight) : visibleHeight);
+		}
+
 		void timerCallback() override
 		{
-			const auto area = safe_area();
-
-			if ((!area.isEmpty()) && (area != content->getBounds()))
+			if ((safe_area() != lastSafeArea) || (server->is_log_shown() != logShown))
 			{
-				resized();
+				lay_out();
 			}
 		}
 
-		std::unique_ptr<Component> content;
+		std::unique_ptr<ServerMainComponent> server; ///< Declared before the viewport, which shows it, so it outlives it
+		Viewport viewport;
+		Rectangle<int> lastSafeArea;
+		bool logShown = false;
 	};
 }
 #endif
@@ -139,7 +158,7 @@ AgISOVirtualTerminalApplication::MainWindow::MainWindow(juce::String name,
 	setUsingNativeTitleBar(true);
 	auto *server = new ServerMainComponent(serverInternalControlFunction, canDrivers, settings.settingsValueTree(), canLogPath, vtNumber, screenCaptureDir);
 #if JUCE_ANDROID
-	setContentOwned(new SafeAreaComponent(server), false);
+	setContentOwned(new PhoneLayoutComponent(server), false);
 #else
 	setContentOwned(server, true);
 #endif
