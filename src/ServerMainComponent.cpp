@@ -47,8 +47,14 @@ ServerMainComponent::ServerMainComponent(
 
 	VirtualTerminalServer::initialize();
 
-	logger.setVisible(true);
-	loggerViewport.setVisible(true);
+#if JUCE_ANDROID
+	// A phone in landscape is too short for the log under the masks. It can be shown from Configure -> Logging.
+	const bool showLogByDefault = false;
+#else
+	const bool showLogByDefault = true;
+#endif
+	logger.setVisible(showLogByDefault);
+	loggerViewport.setVisible(showLogByDefault);
 
 	check_load_settings(settings);
 
@@ -1409,6 +1415,11 @@ void ServerMainComponent::apply_window_state()
 		// Even with nothing saved there is nothing left to wait for, so the flag is cleared
 		// either way. Otherwise the window would be moved back on every timer tick.
 		needToApplyWindowState = false;
+
+#if JUCE_ANDROID
+		// The window always fills the screen on a phone, so a saved geometry has nothing to restore
+		return;
+#endif
 
 		if (savedWindowState.isNotEmpty())
 		{
