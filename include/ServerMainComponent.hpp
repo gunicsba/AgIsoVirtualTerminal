@@ -370,7 +370,11 @@ private:
 	bool saveIopBeforeParse = false;
 	bool checkForUpdatesOnStartup = true;
 	bool alwaysOnTop = false;
+#if JUCE_ANDROID
+	bool fitMasksToWindow = true; ///< A phone screen is smaller than the masks at their reported size, so they fill it by default
+#else
 	bool fitMasksToWindow = false; ///< Scale the masks to fill the window instead of drawing them at their reported size
+#endif
 	bool scalePoolsToDataMask = false; ///< Scale pools drawn for another data mask size to the reported one
 	bool needToApplyAlwaysOnTop = true; ///< Set when the window still has to be told about the setting
 	juce::String savedWindowState; ///< The window geometry loaded from the settings file

@@ -30,6 +30,9 @@ AgISOVirtualTerminalApplication::MainWindow::MainWindow(juce::String name,
 	canDrivers.push_back(std::make_shared<isobus::ProemionCANLinkInterface>(""));
 #elif defined(JUCE_MAC)
 	canDrivers.push_back(std::make_shared<isobus::MacCANPCANPlugin>(PCAN_USBBUS1));
+#elif defined(JUCE_ANDROID)
+	// A phone has no CAN hardware, so the VT reaches the bus through a CANlink over WiFi
+	canDrivers.push_back(std::make_shared<isobus::ProemionCANLinkInterface>(""));
 #else
 	canDrivers.push_back(std::make_shared<isobus::SocketCANInterface>("can0"));
 #endif
@@ -83,6 +86,9 @@ AgISOVirtualTerminalApplication::MainWindow::MainWindow(juce::String name,
 
 #if JUCE_IOS || JUCE_ANDROID
 	setFullScreen(true);
+
+	// A terminal must not go dark while it is in use. On Android this sets FLAG_KEEP_SCREEN_ON.
+	Desktop::setScreenSaverEnabled(false);
 #else
 	// ServerMainComponent adds a larger corner grip for touch screens
 	setResizable(true, false);
