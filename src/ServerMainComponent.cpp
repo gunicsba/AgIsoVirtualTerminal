@@ -21,6 +21,8 @@
 #include "isobus/hardware_integration/toucan_vscp_canal.hpp"
 #elif JUCE_LINUX
 #include "isobus/hardware_integration/socket_can_interface.hpp"
+#elif JUCE_ANDROID
+#include "isobus/hardware_integration/proemion_canlink_interface.hpp"
 #endif
 #include "isobus/isobus/can_stack_logger.hpp"
 
@@ -872,6 +874,8 @@ void ServerMainComponent::getAllCommands(juce::Array<juce::CommandID> &allComman
 	allCommands.add(static_cast<int>(CommandIDs::ConfigureCANHardware));
 #elif JUCE_LINUX
 	allCommands.add(static_cast<int>(CommandIDs::ConfigureCANHardware));
+#elif JUCE_ANDROID
+	allCommands.add(static_cast<int>(CommandIDs::ConfigureCANHardware));
 #endif
 }
 
@@ -1333,6 +1337,8 @@ PopupMenu ServerMainComponent::getMenuForIndex(int index, const juce::String &)
 #ifdef JUCE_WINDOWS
 			retVal.addCommandItem(&mCommandManager, static_cast<int>(CommandIDs::ConfigureCANHardware));
 #elif JUCE_LINUX
+			retVal.addCommandItem(&mCommandManager, static_cast<int>(CommandIDs::ConfigureCANHardware));
+#elif JUCE_ANDROID
 			retVal.addCommandItem(&mCommandManager, static_cast<int>(CommandIDs::ConfigureCANHardware));
 #endif
 		}
@@ -2108,6 +2114,11 @@ void ServerMainComponent::check_load_settings(std::shared_ptr<ValueTree> setting
 				std::static_pointer_cast<isobus::SocketCANInterface>(parentCANDrivers.at(0))->set_name("can0");
 				isobus::CANStackLogger::warn("Socket CAN interface name not yet configured. Using default of \"can0\"");
 			}
+#elif JUCE_ANDROID
+			if (!child.getProperty("ProemionAddress").isVoid())
+			{
+				std::static_pointer_cast<isobus::ProemionCANLinkInterface>(parentCANDrivers.at(0))->set_interface(child.getProperty("ProemionAddress").toString().toStdString());
+			}
 #endif
 			softKeyMaskRenderer.setTopLeftPosition(100 + dataMaskRenderer.getWidth(), 4 + juce::LookAndFeel::getDefaultLookAndFeel().getDefaultMenuBarHeight());
 			JuceManagedWorkingSetCache::set_softkey_mask_dimension_info(softKeyMaskDimensions);
@@ -2397,6 +2408,8 @@ void ServerMainComponent::save_settings()
 		hardwareSettings.setProperty("ProemionAddress", String(std::static_pointer_cast<isobus::ProemionCANLinkInterface>(parentCANDrivers.at(4))->get_interface()), nullptr);
 #elif JUCE_LINUX
 		hardwareSettings.setProperty("SocketCANInterface", String(std::static_pointer_cast<isobus::SocketCANInterface>(parentCANDrivers.at(0))->get_device_name()), nullptr);
+#elif JUCE_ANDROID
+		hardwareSettings.setProperty("ProemionAddress", String(std::static_pointer_cast<isobus::ProemionCANLinkInterface>(parentCANDrivers.at(0))->get_interface()), nullptr);
 #endif
 
 		if (0xFFFFFFFF != hardwareDriverIndex)

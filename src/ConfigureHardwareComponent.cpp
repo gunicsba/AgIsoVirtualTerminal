@@ -15,6 +15,8 @@
 #include "isobus/hardware_integration/toucan_vscp_canal.hpp"
 #elif JUCE_LINUX
 #include "isobus/hardware_integration/socket_can_interface.hpp"
+#elif JUCE_ANDROID
+#include "isobus/hardware_integration/proemion_canlink_interface.hpp"
 #endif
 
 ConfigureHardwareComponent::ConfigureHardwareComponent(ConfigureHardwareWindow &parent, std::vector<std::shared_ptr<isobus::CANHardwarePlugin>> &canDrivers) :
@@ -79,6 +81,15 @@ ConfigureHardwareComponent::ConfigureHardwareComponent(ConfigureHardwareWindow &
 	socketCANNameEditor.setSize(getWidth() - 20, 30);
 	socketCANNameEditor.setTopLeftPosition(10, 80);
 	addAndMakeVisible(socketCANNameEditor);
+#elif JUCE_ANDROID
+	// A phone has no CAN hardware, so the CANlink over WiFi is the only driver
+	proemionAddressEditor.setName("Proemion CANlink Address");
+	proemionAddressEditor.setText(std::static_pointer_cast<isobus::ProemionCANLinkInterface>(parentCANDrivers.at(0))->get_interface());
+	proemionAddressEditor.setTextToShowWhenEmpty("IP address, optionally with :port (default port 30000)", getLookAndFeel().findColour(TextEditor::textColourId).withAlpha(0.5f));
+	proemionAddressEditor.setSize(getWidth() - 20, 30);
+	proemionAddressEditor.setTopLeftPosition(10, 80);
+	proemionAddressEditor.setInputFilter(new TextEditor::LengthAndCharacterRestriction(64, "0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ.-:"), true);
+	addAndMakeVisible(proemionAddressEditor);
 #endif
 	okButton.onClick = [this, &parent]() {
 #ifdef JUCE_WINDOWS
@@ -101,6 +112,9 @@ ConfigureHardwareComponent::ConfigureHardwareComponent(ConfigureHardwareWindow &
 #elif JUCE_LINUX
 		std::static_pointer_cast<isobus::SocketCANInterface>(parentCANDrivers.at(0))->set_name(socketCANNameEditor.getText().toStdString());
 		isobus::CANStackLogger::info("Updated socket CAN interface name to: " + socketCANNameEditor.getText().toStdString());
+#elif JUCE_ANDROID
+		std::static_pointer_cast<isobus::ProemionCANLinkInterface>(parentCANDrivers.at(0))->set_interface(proemionAddressEditor.getText().trim().toStdString());
+		isobus::CANStackLogger::info("Updated the CANlink address to: " + proemionAddressEditor.getText().trim().toStdString());
 #endif
 		parent.parentServer.save_settings();
 		parent.exitModalState(1);
@@ -118,6 +132,8 @@ void ConfigureHardwareComponent::paint(Graphics &graphics)
 	graphics.drawFittedText("Select the CAN driver to use", 10, 10, bounds.getWidth() - 20, 54, Justification::centredTop, 3);
 #elif JUCE_LINUX
 	graphics.drawFittedText("Enter the name of the CAN interface to use (like \"can0\")", 10, 10, bounds.getWidth() - 20, 54, Justification::centredTop, 3);
+#elif JUCE_ANDROID
+	graphics.drawFittedText("Enter the address of the Proemion CANlink to connect to over WiFi", 10, 10, bounds.getWidth() - 20, 54, Justification::centredTop, 3);
 #endif
 
 	graphics.setFont(12.0f);
@@ -135,6 +151,8 @@ void ConfigureHardwareComponent::paint(Graphics &graphics)
 	}
 #elif JUCE_LINUX
 	graphics.drawFittedText("Socket CAN Interface Name", socketCANNameEditor.getBounds().getX(), socketCANNameEditor.getBounds().getY() - 14, socketCANNameEditor.getBounds().getWidth(), 12, Justification::centredLeft, 1);
+#elif JUCE_ANDROID
+	graphics.drawFittedText("CANlink IP Address", proemionAddressEditor.getBounds().getX(), proemionAddressEditor.getBounds().getY() - 14, proemionAddressEditor.getBounds().getWidth(), 12, Justification::centredLeft, 1);
 #endif
 }
 
