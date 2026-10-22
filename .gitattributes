@@ -1,0 +1,2 @@
+# Bash fails on CRLF, which core.autocrlf would give the Android build scripts on Windows
+android/*.sh text eol=lf
