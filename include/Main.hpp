@@ -68,6 +68,22 @@ public:
 			}
 		}
 
+#if JUCE_ANDROID
+		// A phone has fewer logical pixels than the dialogs and the masks need, and the dialogs
+		// cannot scroll. A smaller global scale gives the short side of the screen at least
+		// MINIMUM_SHORT_SIDE logical pixels. Tablets that already have them keep their scale.
+		if (auto *display = Desktop::getInstance().getDisplays().getPrimaryDisplay())
+		{
+			constexpr float MINIMUM_SHORT_SIDE = 560.0f;
+			const auto shortSide = static_cast<float>(jmin(display->totalArea.getWidth(), display->totalArea.getHeight()));
+
+			if ((shortSide > 0.0f) && (shortSide < MINIMUM_SHORT_SIDE))
+			{
+				Desktop::getInstance().setGlobalScaleFactor(shortSide / MINIMUM_SHORT_SIDE);
+			}
+		}
+#endif
+
 		mainWindow.reset(new MainWindow(getApplicationNameWithBuildInfo(), logFile.currentLogFile(), vtNumber, screenCaptureDir));
 	}
 

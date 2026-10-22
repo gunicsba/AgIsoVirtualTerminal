@@ -9,6 +9,61 @@
 #include "Settings.hpp"
 #include "git.h"
 
+#if JUCE_ANDROID
+namespace
+{
+	/// Android draws apps under the status bar, the camera cutout and the gesture bar, so the VT is
+	/// laid out inside the display's safe area. The insets can arrive after the first layout, so they
+	/// are checked again now and then.
+	class SafeAreaComponent : public Component
+	  , private Timer
+	{
+	public:
+		explicit SafeAreaComponent(Component *contentToOwn) :
+		  content(contentToOwn)
+		{
+			addAndMakeVisible(*content);
+			startTimer(500);
+		}
+
+		void paint(Graphics &g) override
+		{
+			g.fillAll(getLookAndFeel().findColour(ResizableWindow::backgroundColourId));
+		}
+
+		void resized() override
+		{
+			const auto area = safe_area();
+			content->setBounds(area.isEmpty() ? getLocalBounds() : area);
+		}
+
+	private:
+		Rectangle<int> safe_area() const
+		{
+			if (auto *display = Desktop::getInstance().getDisplays().getDisplayForRect(getScreenBounds()))
+			{
+				// In screen coordinates, so it is right whether or not the window already avoids the bars
+				const auto safeOnScreen = display->safeAreaInsets.subtractedFrom(display->totalArea);
+				return getLocalArea(nullptr, safeOnScreen).getIntersection(getLocalBounds());
+			}
+			return {};
+		}
+
+		void timerCallback() override
+		{
+			const auto area = safe_area();
+
+			if ((!area.isEmpty()) && (area != content->getBounds()))
+			{
+				resized();
+			}
+		}
+
+		std::unique_ptr<Component> content;
+	};
+}
+#endif
+
 AgISOVirtualTerminalApplication::MainWindow::MainWindow(juce::String name,
                                                         const std::string &canLogPath,
                                                         int vtNumberCmdLineArg,
@@ -82,7 +137,12 @@ AgISOVirtualTerminalApplication::MainWindow::MainWindow(juce::String name,
 	serverNAME.set_manufacturer_code(1407);
 	serverInternalControlFunction = isobus::CANNetworkManager::CANNetwork.create_internal_control_function(serverNAME, 0, 0x26);
 	setUsingNativeTitleBar(true);
-	setContentOwned(new ServerMainComponent(serverInternalControlFunction, canDrivers, settings.settingsValueTree(), canLogPath, vtNumber, screenCaptureDir), true);
+	auto *server = new ServerMainComponent(serverInternalControlFunction, canDrivers, settings.settingsValueTree(), canLogPath, vtNumber, screenCaptureDir);
+#if JUCE_ANDROID
+	setContentOwned(new SafeAreaComponent(server), false);
+#else
+	setContentOwned(server, true);
+#endif
 
 #if JUCE_IOS || JUCE_ANDROID
 	setFullScreen(true);
