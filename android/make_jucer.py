@@ -17,8 +17,9 @@ REPO = os.path.dirname(HERE)
 
 STACK_HARDWARE_SOURCES = ["can_hardware_interface.cpp", "proemion_canlink_interface.cpp"]
 MODULES = ["juce_core", "juce_events", "juce_data_structures", "juce_graphics", "juce_gui_basics", "juce_gui_extra",
-           "juce_audio_basics", "juce_audio_devices", "juce_audio_formats", "juce_audio_processors", "juce_audio_utils"]
-DEFINES = ["JUCE_WEB_BROWSER=0", "JUCE_USE_CURL=0", "ISOBUS_PROEMION_AVAILABLE=1", "CAN_PORT_MAXIMUM_VALUE=4"]
+           "juce_audio_basics", "juce_audio_devices", "juce_audio_formats", "juce_audio_processors", "juce_audio_processors_headless", "juce_audio_utils"]
+DEFINES = ["JUCE_WEB_BROWSER=0", "JUCE_USE_CURL=0", "ISOBUS_PROEMION_AVAILABLE=1", "CAN_PORT_MAXIMUM_VALUE=4",
+           "JUCE_CORE_INCLUDE_JNI_HELPERS=1"]
 
 # VTActivity starts VTService, a foreground service that keeps the VT running while another app is in
 # front. The connectedDevice type needs one of the WiFi permissions on Android 14 and later.
@@ -39,6 +40,17 @@ def vt_sources():
 	cmake = open(os.path.join(REPO, "CMakeLists.txt"), encoding="utf-8").read()
 	block = re.search(r"target_sources\(\s*AgISOVirtualTerminal\s+PRIVATE(.*?)\)", cmake, re.S).group(1)
 	return [os.path.join(REPO, s) for s in re.findall(r'"?(src/[^"\s]+\.cpp)"?', block)]
+
+
+def vt_version():
+	cmake = open(os.path.join(REPO, "CMakeLists.txt"), encoding="utf-8").read()
+	return re.search(r"project\(.*?VERSION\s+([0-9]+\.[0-9]+\.[0-9]+)", cmake, re.S).group(1)
+
+
+def version_code(version):
+	# 1.7.0 is 10700, so each release installs over the one before
+	major, minor, patch = (int(part) for part in version.split("."))
+	return major * 10000 + minor * 100 + patch
 
 
 def stack_sources(stack):
@@ -67,7 +79,7 @@ def main():
 	jucer = """<?xml version="1.0" encoding="UTF-8"?>
 
 <JUCERPROJECT id="AgIsoVT" name="AgISOVirtualTerminal" projectType="guiapp" useAppConfig="0"
-              addUsingNamespaceToJuceHeader="1" jucerFormatVersion="1" version="1.6.0"
+              addUsingNamespaceToJuceHeader="1" jucerFormatVersion="1" version="{version}"
               companyName="Open-Agriculture" companyWebsite="https://github.com/Open-Agriculture"
               bundleIdentifier="com.openagriculture.agisovirtualterminal" cppLanguageStandard="17"
               defines={defines}>
@@ -87,7 +99,7 @@ def main():
   <JUCEOPTIONS JUCE_WEB_BROWSER="0" JUCE_USE_CURL="0"/>
   <EXPORTFORMATS>
     <ANDROIDSTUDIO targetFolder="Builds/Android" bigIcon="icon" androidMinimumSDK="24" androidTargetSDK="35"
-                   androidInternetNeeded="1" androidScreenOrientation="landscape" androidVersionCode="1"
+                   androidInternetNeeded="1" androidScreenOrientation="landscape" androidVersionCode="{version_code}"
                    androidActivitySubClassName={activity} androidAdditionalJavaFolders={javafolders}
                    androidOtherPermissions={permissions} androidManifestCustomXmlElements={manifest}>
       <CONFIGURATIONS>
@@ -100,7 +112,9 @@ def main():
     </ANDROIDSTUDIO>
   </EXPORTFORMATS>
 </JUCERPROJECT>
-""".format(defines=quoteattr("\n".join(DEFINES)),
+""".format(version=vt_version(),
+	           version_code=version_code(vt_version()),
+	           defines=quoteattr("\n".join(DEFINES)),
 	           vt=file_items(vt_sources(), "vt"),
 	           icon=quoteattr(rel(os.path.join(REPO, "doc/smallLogo.png"))),
 	           stack=file_items(stack_sources(stack), "st"),
