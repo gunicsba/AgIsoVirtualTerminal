@@ -56,9 +56,9 @@ public class VTActivity extends JuceActivity
     }
 
     /**
-     * Hides the status and navigation bars, which Android draws over the VT's menu. A swipe from the
-     * edge shows them for a moment. JUCE's window cannot take focus, so the bars follow this activity's
-     * window. Android ignores the request in split screen and pop-up windows.
+     * Hides the navigation bar, which a swipe from the edge shows for a moment. The status bar stays, so
+     * the notifications can be pulled down, and the VT is laid out below it. The bars follow this
+     * activity's window. Android ignores the request in split screen and pop-up windows.
      */
     private void hideSystemBars()
     {
@@ -69,15 +69,30 @@ public class VTActivity extends JuceActivity
             if (controller != null)
             {
                 controller.setSystemBarsBehavior (WindowInsetsController.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE);
-                controller.hide (WindowInsets.Type.statusBars() | WindowInsets.Type.navigationBars());
+                controller.show (WindowInsets.Type.statusBars());
+                controller.hide (WindowInsets.Type.navigationBars());
             }
         }
         else
         {
             getWindow().getDecorView().setSystemUiVisibility (View.SYSTEM_UI_FLAG_IMMERSIVE_STICKY
-                                                              | View.SYSTEM_UI_FLAG_FULLSCREEN
                                                               | View.SYSTEM_UI_FLAG_HIDE_NAVIGATION);
         }
+    }
+
+    /** The status bar's height in pixels, or 0 while it is hidden. Called from the VT's layout. */
+    public int getStatusBarHeight()
+    {
+        if (Build.VERSION.SDK_INT >= 30)
+        {
+            WindowInsets insets = getWindow().getDecorView().getRootWindowInsets();
+
+            if (insets != null)
+                return insets.getInsets (WindowInsets.Type.statusBars()).top;
+        }
+
+        int id = getResources().getIdentifier ("status_bar_height", "dimen", "android");
+        return (id > 0) ? getResources().getDimensionPixelSize (id) : 0;
     }
 
     @Override

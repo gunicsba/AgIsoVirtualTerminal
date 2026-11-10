@@ -17,6 +17,7 @@ namespace
 	/// When the log is shown it is a page of its own below the VT, reached with the scroll bar. Dragging
 	/// does not scroll, as touches on the masks belong to the implements.
 	class PhoneLayoutComponent : public Component
+	  , public ApplicationCommandTarget
 	  , private Timer
 	{
 	public:
@@ -41,13 +42,58 @@ namespace
 			lay_out();
 		}
 
+		// With nothing focused, JUCE looks for the menu's commands from the window's content up, which misses the VT
+		ApplicationCommandTarget *getNextCommandTarget() override
+		{
+			return server.get();
+		}
+
+		void getAllCommands(Array<CommandID> &) override
+		{
+		}
+
+		void getCommandInfo(CommandID, ApplicationCommandInfo &) override
+		{
+		}
+
+		bool perform(const InvocationInfo &) override
+		{
+			return false;
+		}
+
 	private:
+		/// The status bar's height in pixels, from VTActivity
+		static int get_status_bar_height()
+		{
+			auto *env = getEnv();
+			const LocalRef<jobject> activity(getMainActivity());
+
+			if ((nullptr == env) || (nullptr == activity))
+			{
+				return 0;
+			}
+
+			const LocalRef<jclass> activityClass(env->GetObjectClass(activity.get()));
+			const auto method = env->GetMethodID(activityClass.get(), "getStatusBarHeight", "()I");
+
+			if (nullptr == method)
+			{
+				env->ExceptionClear();
+				return 0;
+			}
+			return env->CallIntMethod(activity.get(), method);
+		}
+
 		Rectangle<int> safe_area() const
 		{
 			if (auto *display = Desktop::getInstance().getDisplays().getDisplayForRect(getScreenBounds()))
 			{
 				// In screen coordinates, so it is right whether or not the window already avoids the bars
-				const auto safeOnScreen = display->safeAreaInsets.subtractedFrom(display->totalArea);
+				auto safeOnScreen = display->safeAreaInsets.subtractedFrom(display->totalArea);
+
+				// JUCE's safe area leaves out the status bar, which is drawn over the window
+				const int statusBarHeight = roundToInt(get_status_bar_height() / display->scale);
+				safeOnScreen.setTop(jmax(safeOnScreen.getY(), display->totalArea.getY() + statusBarHeight));
 				return getLocalArea(nullptr, safeOnScreen).getIntersection(getLocalBounds());
 			}
 			return {};
