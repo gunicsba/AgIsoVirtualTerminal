@@ -27,8 +27,6 @@ private:
 	static void paint_children(Graphics &g, Component &area, Component &parent, std::uint16_t objectID);
 
 	static constexpr float FRAME_WIDTH = 3.0f;
-	static const Colour FRAME_COLOUR;
-	static const Colour OUTLINE_COLOUR;
 };
 
 #endif // FOCUS_FRAME_HPP

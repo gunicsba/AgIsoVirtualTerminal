@@ -7,9 +7,6 @@
 
 #include "isobus/isobus/isobus_virtual_terminal_objects.hpp"
 
-const Colour FocusFrame::FRAME_COLOUR = Colour(0xFFFF8C00);
-const Colour FocusFrame::OUTLINE_COLOUR = Colour(0xC0000000);
-
 void FocusFrame::paint(Graphics &g, Component &area, std::uint16_t objectID)
 {
 	if (isobus::NULL_OBJECT_ID != objectID)
@@ -34,9 +31,7 @@ void FocusFrame::paint_children(Graphics &g, Component &area, Component &parent,
 			// Around the object, so it stays readable, but kept inside the area
 			const auto bounds = area.getLocalArea(child, child->getLocalBounds()).toFloat();
 			const auto frame = bounds.expanded(FRAME_WIDTH).getIntersection(area.getLocalBounds().toFloat());
-			g.setColour(OUTLINE_COLOUR);
-			g.drawRect(frame.expanded(1.0f), 1.0f);
-			g.setColour(FRAME_COLOUR);
+			g.setColour(area.findColour(TextEditor::focusedOutlineColourId));
 			g.drawRect(frame, FRAME_WIDTH);
 		}
 		else
