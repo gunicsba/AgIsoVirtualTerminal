@@ -39,10 +39,10 @@ ServerMainComponent::ServerMainComponent(
   std::shared_ptr<isobus::InternalControlFunction> serverControlFunction,
   std::vector<std::shared_ptr<isobus::CANHardwarePlugin>> &canDrivers,
   std::shared_ptr<ValueTree> settings,
-  const std::string &canLogPath_,
+  ASCIILogFile &canLog_,
   std::uint8_t vtNumberArg,
   std::string screenCaptureDir) :
-  VirtualTerminalServer(serverControlFunction), screenCaptureDirArgument(screenCaptureDir), workingSetSelector(*this), dataMaskRenderer(*this), softKeyMaskRenderer(*this), parentCANDrivers(canDrivers), canLogPath(canLogPath_)
+  VirtualTerminalServer(serverControlFunction), screenCaptureDirArgument(screenCaptureDir), workingSetSelector(*this), dataMaskRenderer(*this), softKeyMaskRenderer(*this), parentCANDrivers(canDrivers), canLog(canLog_)
 {
 	isobus::CANStackLogger::set_can_stack_logger_sink(&logger);
 	isobus::CANStackLogger::set_log_level(isobus::CANStackLogger::LoggingLevel::Info);
@@ -70,15 +70,16 @@ ServerMainComponent::ServerMainComponent(
 	timeServingInterface = std::make_unique<isobus::TimeDateInterface>(serverControlFunction, timerCallback);
 	timeServingInterface->initialize();
 
+	const bool isNewSerialNumber = ecuSerialNumber.isEmpty();
+	if (isNewSerialNumber)
+	{
+		ecuSerialNumber = Uuid().toString().toUpperCase();
+	}
+
 	diagnosticProtocol = std::make_unique<isobus::DiagnosticProtocol>(serverControlFunction);
-	diagnosticProtocol->set_product_identification_brand("Open-Agriculture");
-	diagnosticProtocol->set_product_identification_model("AgIsoVirtualTerminal");
-	diagnosticProtocol->set_software_id_field(0, AgISOVirtualTerminalApplication::getApplicationBuildInfo());
+	configure_diagnostic_protocol();
 	diagnosticProtocol->initialize();
 
-	isobus::CANHardwareInterface::get_periodic_update_event_dispatcher().add_listener([this]() {
-		diagnosticProtocol->update();
-	});
 	get_on_repaint_event_dispatcher().add_listener([this](std::shared_ptr<isobus::VirtualTerminalServerManagedWorkingSet>) { this->repaint_on_next_update(); });
 	get_on_change_active_mask_event_dispatcher().add_listener([this](std::shared_ptr<isobus::VirtualTerminalServerManagedWorkingSet> affectedWorkingSet, std::uint16_t workingSet, std::uint16_t newMask) { this->on_change_active_mask_callback(affectedWorkingSet, workingSet, newMask); });
 	get_on_change_active_softkey_mask_event_dispatcher().add_listener([this](std::shared_ptr<isobus::VirtualTerminalServerManagedWorkingSet> affectedWorkingSet, std::uint16_t mask, std::uint16_t newSoftKeyMask) { this->on_change_active_softkey_mask_callback(affectedWorkingSet, mask, newSoftKeyMask); });
@@ -120,6 +121,18 @@ ServerMainComponent::ServerMainComponent(
 	if (checkForUpdatesOnStartup && !hasRecentUpdateCheck)
 	{
 		check_for_update(false);
+	}
+
+	if (isNewSerialNumber)
+	{
+		save_settings();
+	}
+
+	// Last, because the CAN threads call into this object as soon as they run
+	if (autostart)
+	{
+		start_can_interface();
+		isobus::CANStackLogger::info("AutoStart enabled. Starting CAN hardware interface.");
 	}
 }
 
@@ -895,8 +908,7 @@ bool ServerMainComponent::perform(const InvocationInfo &info)
 		{
 			auto diagnosticFileBuilder = std::make_unique<ZipFile::Builder>();
 
-			// for the current session add the current CAN log file only
-			auto canLogFileName = File(canLogPath);
+			auto canLogFileName = File(canLog.currentLogFile());
 			diagnosticFileBuilder->addFile(canLogFileName, 9, canLogFileName.getFileName());
 
 			diagnosticFileBuilder->addFile(logger.getLogFile(), 9, logger.getLogFile().getFileName());
@@ -1212,6 +1224,21 @@ static std::shared_ptr<isobus::VTObject> get_active_mask(const std::shared_ptr<i
 	return retVal;
 }
 
+static std::uint16_t get_soft_key_mask(const std::shared_ptr<isobus::VTObject> &mask)
+{
+	std::uint16_t retVal = isobus::NULL_OBJECT_ID;
+
+	if (is_alarm_mask(mask))
+	{
+		retVal = std::static_pointer_cast<isobus::AlarmMask>(mask)->get_soft_key_mask();
+	}
+	else if ((nullptr != mask) && (isobus::VirtualTerminalObjectType::DataMask == mask->get_object_type()))
+	{
+		retVal = std::static_pointer_cast<isobus::DataMask>(mask)->get_soft_key_mask();
+	}
+	return retVal;
+}
+
 void ServerMainComponent::change_selected_working_set(std::uint8_t index)
 {
 	const auto highestAlarmWorkingSet = get_highest_priority_alarm_working_set();
@@ -1243,20 +1270,12 @@ void ServerMainComponent::change_selected_working_set(std::uint8_t index)
 		auto workingSetObject = std::static_pointer_cast<isobus::WorkingSet>(ws->get_working_set_object());
 		std::uint16_t previousActiveMask = activeWorkingSetDataMaskObjectID;
 		activeWorkingSetDataMaskObjectID = workingSetObject->get_active_mask();
-		activeWorkingSetSoftkeyMaskObjectID = isobus::NULL_OBJECT_ID;
-
 		auto activeMask = ws->get_object_by_id(activeWorkingSetDataMaskObjectID);
-		if (nullptr != activeMask)
+		activeWorkingSetSoftkeyMaskObjectID = get_soft_key_mask(activeMask);
+
+		if ((nullptr != activeMask) && (isobus::VirtualTerminalObjectType::DataMask == activeMask->get_object_type()))
 		{
-			if (isobus::VirtualTerminalObjectType::AlarmMask == activeMask->get_object_type())
-			{
-				activeWorkingSetSoftkeyMaskObjectID = std::static_pointer_cast<isobus::AlarmMask>(activeMask)->get_soft_key_mask();
-			}
-			else if (isobus::VirtualTerminalObjectType::DataMask == activeMask->get_object_type())
-			{
-				activeWorkingSetSoftkeyMaskObjectID = std::static_pointer_cast<isobus::DataMask>(activeMask)->get_soft_key_mask();
-				lastDataMaskWorkingSet = ws;
-			}
+			lastDataMaskWorkingSet = ws;
 		}
 
 		dataMaskRenderer.on_change_active_mask(ws);
@@ -1814,10 +1833,12 @@ void ServerMainComponent::change_active_mask(std::shared_ptr<isobus::VirtualTerm
 	}
 	else
 	{
-		dataMaskRenderer.on_change_active_mask(activeWorkingSet);
-		softKeyMaskRenderer.on_change_active_mask(activeWorkingSet);
+		// Each queued change counts, even when a later one has already put the old mask back
+		const bool maskReplaced = (newMask != activeWorkingSetDataMaskObjectID);
+		dataMaskRenderer.on_change_active_mask(activeWorkingSet, maskReplaced);
+		softKeyMaskRenderer.on_change_active_mask(activeWorkingSet, maskReplaced);
 
-		if (activeWorkingSetDataMaskObjectID != newMask)
+		if (maskReplaced)
 		{
 			activeWorkingSetDataMaskObjectID = newMask;
 
@@ -1885,8 +1906,9 @@ void ServerMainComponent::change_active_softkey_mask(std::shared_ptr<isobus::Vir
 		return;
 	}
 
+	const bool maskReplaced = (newSoftKeyMask != activeWorkingSetSoftkeyMaskObjectID);
 	activeWorkingSetSoftkeyMaskObjectID = newSoftKeyMask;
-	softKeyMaskRenderer.on_change_active_mask(affectedWorkingSet);
+	softKeyMaskRenderer.on_change_active_mask(affectedWorkingSet, maskReplaced);
 
 	if (send_status_message())
 	{
@@ -1911,7 +1933,24 @@ void ServerMainComponent::object_pool_parse_finished(std::shared_ptr<isobus::Vir
 
 		// A new pool is a new activation, and Load Version changes the mask without a callback
 		alarmActivationOrder.erase(workingSet);
-		record_alarm_activation(workingSet, std::static_pointer_cast<isobus::WorkingSet>(workingSet->get_working_set_object())->get_active_mask());
+		const auto activeMaskID = std::static_pointer_cast<isobus::WorkingSet>(workingSet->get_working_set_object())->get_active_mask();
+		record_alarm_activation(workingSet, activeMaskID);
+
+		// The drawn masks still hold the old pool's objects, and the new pool can set a different active mask
+		if (workingSet == activeWorkingSet)
+		{
+			if (activeMaskID != activeWorkingSetDataMaskObjectID)
+			{
+				change_active_mask(workingSet, activeMaskID);
+			}
+			else
+			{
+				dataMaskRenderer.close_replaced_input_dialog(workingSet);
+				activeWorkingSetSoftkeyMaskObjectID = get_soft_key_mask(workingSet->get_object_by_id(activeMaskID));
+				repaint_data_and_soft_key_mask();
+				update_ack_button_visibility();
+			}
+		}
 	}
 	else
 	{
@@ -2065,6 +2104,13 @@ void ServerMainComponent::stop_can_interface_with_alert(const String &title)
 void ServerMainComponent::start_can_interface()
 {
 	isobus::CANStackLogger::info("Starting CAN interface");
+
+	// CANHardwareInterface::stop() removes every listener, so they are added again on each start
+	isobus::CANHardwareInterface::get_periodic_update_event_dispatcher().add_listener([this]() {
+		diagnosticProtocol->update();
+	});
+	canLog.register_can_listeners();
+
 	bool started = isobus::CANHardwareInterface::start();
 	dataMaskRenderer.set_has_started(true);
 	hasStartBeenCalled = true;
@@ -2073,6 +2119,41 @@ void ServerMainComponent::start_can_interface()
 	{
 		stop_can_interface_with_alert("Could not start the CAN interface");
 	}
+}
+
+void ServerMainComponent::configure_diagnostic_protocol()
+{
+	using ECUIdentificationFields = isobus::DiagnosticProtocol::ECUIdentificationFields;
+	using Functionalities = isobus::ControlFunctionFunctionalities::Functionalities;
+
+	diagnosticProtocol->set_product_identification_code(ecuSerialNumber.toStdString()); // Unique together with the brand, see ISO 11783-12 A.14
+	diagnosticProtocol->set_product_identification_brand("Open-Agriculture");
+	diagnosticProtocol->set_product_identification_model("AgIsoVirtualTerminal");
+	diagnosticProtocol->set_software_id_field(0, AgISOVirtualTerminalApplication::getApplicationBuildInfo());
+#ifdef AGISOSTACK_VERSION
+	diagnosticProtocol->set_software_id_field(1, "AgIsoStack++ " AGISOSTACK_VERSION);
+#endif
+	diagnosticProtocol->set_ecu_id_field(ECUIdentificationFields::PartNumber, ecuPartNumber.toStdString());
+	diagnosticProtocol->set_ecu_id_field(ECUIdentificationFields::SerialNumber, ecuSerialNumber.toStdString());
+	diagnosticProtocol->set_ecu_id_field(ECUIdentificationFields::Location, "Cab");
+	diagnosticProtocol->set_ecu_id_field(ECUIdentificationFields::Type, "Virtual Terminal");
+	diagnosticProtocol->set_ecu_id_field(ECUIdentificationFields::ManufacturerName, "Open-Agriculture");
+	diagnosticProtocol->set_ecu_id_field(ECUIdentificationFields::HardwareID, ecuHardwareId.toStdString());
+
+	// UT 1 is VT version 2, UT 2 is VT version 3 to 5, UT 3 is VT version 6
+	std::uint8_t generation = 2;
+	if (VTVersion::Version2OrOlder == versionToReport)
+	{
+		generation = 1;
+	}
+	else if (VTVersion::Version6 == versionToReport)
+	{
+		generation = 3;
+	}
+
+	auto &functionalities = diagnosticProtocol->ControlFunctionFunctionalitiesMessageInterface;
+	functionalities.set_functionality_is_supported(Functionalities::UniversalTerminalServer, generation, true);
+	functionalities.set_minimum_control_function_option_state(isobus::ControlFunctionFunctionalities::MinimumControlFunctionOptions::SupportOfHeartbeatProducer, true);
 }
 
 void ServerMainComponent::check_load_settings(std::shared_ptr<ValueTree> settings)
@@ -2135,6 +2216,22 @@ void ServerMainComponent::check_load_settings(std::shared_ptr<ValueTree> setting
 			if (!child.getProperty("LanguageCode").isVoid())
 			{
 				languageCommandInterface.set_language_code(String(child.getProperty("LanguageCode").toString()).toStdString());
+			}
+		}
+		else if (Identifier("Identification") == child.getType())
+		{
+			// "*" and "#" are delimiters in the ISO 11783-12 messages
+			if (!child.getProperty("PartNumber").isVoid())
+			{
+				ecuPartNumber = child.getProperty("PartNumber").toString().removeCharacters("*#");
+			}
+			if (!child.getProperty("SerialNumber").isVoid())
+			{
+				ecuSerialNumber = child.getProperty("SerialNumber").toString().removeCharacters("*#");
+			}
+			if (!child.getProperty("HardwareID").isVoid())
+			{
+				ecuHardwareId = child.getProperty("HardwareID").toString().removeCharacters("*#");
 			}
 		}
 		else if (Identifier("Compatibility") == child.getType())
@@ -2241,12 +2338,6 @@ void ServerMainComponent::check_load_settings(std::shared_ptr<ValueTree> setting
 			if (!child.getProperty("AutoStart").isVoid())
 			{
 				autostart = static_cast<bool>(static_cast<int>(child.getProperty("AutoStart")));
-
-				if (autostart)
-				{
-					start_can_interface();
-					isobus::CANStackLogger::info("AutoStart enabled. Starting CAN hardware interface.");
-				}
 			}
 
 			if (!child.getProperty("AlarmAckKey").isVoid())
@@ -2451,6 +2542,7 @@ void ServerMainComponent::save_settings()
 		ValueTree hardwareSettings("Hardware");
 		ValueTree loggingSettings("Logging");
 		ValueTree controlSettings("Control");
+		ValueTree identificationSettings("Identification");
 
 		std::uint32_t hardwareDriverIndex = 0xFFFFFFFF;
 
@@ -2508,11 +2600,15 @@ void ServerMainComponent::save_settings()
 		controlSettings.setProperty("CheckForUpdates", checkForUpdatesOnStartup, nullptr);
 		controlSettings.setProperty("LastUpdateCheck", lastUpdateCheck, nullptr);
 		controlSettings.setProperty("SkippedUpdateVersion", skippedUpdateVersion, nullptr);
+		identificationSettings.setProperty("PartNumber", ecuPartNumber, nullptr);
+		identificationSettings.setProperty("SerialNumber", ecuSerialNumber, nullptr);
+		identificationSettings.setProperty("HardwareID", ecuHardwareId, nullptr);
 		settings.appendChild(languageCommandSettings, nullptr);
 		settings.appendChild(compatibilitySettings, nullptr);
 		settings.appendChild(hardwareSettings, nullptr);
 		settings.appendChild(loggingSettings, nullptr);
 		settings.appendChild(controlSettings, nullptr);
+		settings.appendChild(identificationSettings, nullptr);
 
 		// An empty state means there is no window yet, and overwriting a good saved geometry
 		// with nothing would lose it.

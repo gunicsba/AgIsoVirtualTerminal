@@ -10,6 +10,7 @@
 #ifndef SERVER_MAIN_COMPONENT_HPP
 #define SERVER_MAIN_COMPONENT_HPP
 
+#include "ASCIILogFile.hpp"
 #include "ConfigureHardwareWindow.hpp"
 #include "DataMaskRenderAreaComponent.hpp"
 #include "DiagnosticsWindow.hpp"
@@ -39,7 +40,7 @@ public:
 	ServerMainComponent(std::shared_ptr<isobus::InternalControlFunction> serverControlFunction,
 	                    std::vector<std::shared_ptr<isobus::CANHardwarePlugin>> &canDrivers,
 	                    std::shared_ptr<ValueTree> settings,
-	                    const std::string &canLogPath_,
+	                    ASCIILogFile &canLog_,
 	                    std::uint8_t vtNumberArg = 0,
 	                    std::string screenCaptureDir = "");
 	~ServerMainComponent() override;
@@ -302,6 +303,9 @@ private:
 	void update_ack_button_visibility();
 	void check_load_settings(std::shared_ptr<ValueTree> settings);
 
+	/// @brief Fills in the ISO 11783-12 identification messages and functionalities
+	void configure_diagnostic_protocol();
+
 	/// @brief Asks GitHub if a newer release is available and tells the user if there is one
 	/// @param[in] reportWhenUpToDate If true, also show a message when this is already the latest release
 	void check_for_update(bool reportWhenUpToDate);
@@ -330,7 +334,7 @@ private:
 	static constexpr juce::int64 UPDATE_CHECK_INTERVAL_MS = 60LL * 60LL * 1000LL;
 	const std::string ISO_DATA_PATH = "iso_data";
 	std::string screenCaptureDirArgument = "";
-	std::string canLogPath;
+	ASCIILogFile &canLog;
 
 	juce::ApplicationCommandManager mCommandManager;
 	UpdateChecker updateChecker;
@@ -366,6 +370,9 @@ private:
 	int alarmAckKeyCode = juce::KeyPress::escapeKey;
 	juce::int64 lastUpdateCheck = 0;
 	juce::String skippedUpdateVersion;
+	juce::String ecuPartNumber = "AgIsoVirtualTerminal";
+	juce::String ecuSerialNumber; ///< Generated on the first start, so it is unique per install
+	juce::String ecuHardwareId = "Generic";
 	std::uint8_t vtNumber = 1; // VT number in the range of 1-32
 	std::uint8_t numberOfPoolsToRender = 0;
 	VTVersion versionToReport = VTVersion::Version5;

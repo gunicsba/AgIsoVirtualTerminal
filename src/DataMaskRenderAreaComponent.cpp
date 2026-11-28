@@ -11,7 +11,9 @@
 #include "AppImages.h"
 #include "ButtonComponent.hpp"
 #include "FocusFrame.hpp"
+#include "InputStringFilter.hpp"
 #include "JuceManagedWorkingSetCache.hpp"
+#include "NumberComponent.hpp"
 #include "OutputListComponent.hpp"
 #include "ServerMainComponent.hpp"
 #include "isobus/isobus/can_stack_logger.hpp"
@@ -134,7 +136,7 @@ int DataMaskRenderAreaComponent::to_pool_coordinate(float renderedCoordinate) co
 	return static_cast<int>(std::floor(poolCoordinate));
 }
 
-void DataMaskRenderAreaComponent::on_change_active_mask(std::shared_ptr<isobus::VirtualTerminalServerManagedWorkingSet> workingSet)
+void DataMaskRenderAreaComponent::on_change_active_mask(std::shared_ptr<isobus::VirtualTerminalServerManagedWorkingSet> workingSet, bool maskReplaced)
 {
 	const auto previousWorkingSet = parentWorkingSet;
 	const auto previousDesignedMaskSize = designedMaskSize;
@@ -185,11 +187,25 @@ void DataMaskRenderAreaComponent::on_change_active_mask(std::shared_ptr<isobus::
 			}
 		}
 	}
-	// Every repaint comes through here, so only a new mask or working set ends the edit or the press
-	if ((previousWorkingSet != parentWorkingSet) || (previousActiveMaskID != activeMaskID))
+	const bool maskChanged = maskReplaced || (previousWorkingSet != parentWorkingSet) || (previousActiveMaskID != activeMaskID);
+
+	// Every repaint comes through here, so only a new mask or working set ends the edit
+	if (maskChanged)
 	{
-		pressedButtonID = isobus::NULL_OBJECT_ID;
 		close_input_dialogs();
+	}
+
+	if (isobus::NULL_OBJECT_ID != pressedButtonID)
+	{
+		const auto objectUnderPress = (nullptr != parentWorkingSet) ? getClickedChildRecursive(parentWorkingSet->get_object_by_id(activeMaskID), pressedButtonPoint.x, pressedButtonPoint.y) : nullptr;
+
+		// A Button that a command erased or moved off the touch is released now, and the rest of the touch is ignored
+		if (maskChanged || (nullptr == objectUnderPress) || (pressedButtonID != objectUnderPress->get_id()))
+		{
+			pressedButtonID = isobus::NULL_OBJECT_ID;
+			pressCancelled = true;
+			ownerServer.release_held_buttons();
+		}
 	}
 	// Rebuilt Buttons start unpressed
 	show_button_pressed(*this, pressedButtonID, true);
@@ -214,9 +230,9 @@ std::uint16_t DataMaskRenderAreaComponent::abort_input(std::shared_ptr<isobus::V
 		const std::lock_guard<std::mutex> lock(openInputMutex);
 		if ((nullptr != workingSet) && (openInputWorkingSet == workingSet))
 		{
-			abortedObjectID = openInputObjectID;
+			abortedObjectID = openInputObject->get_id();
 			openInputWorkingSet.reset();
-			openInputObjectID = isobus::NULL_OBJECT_ID;
+			openInputObject.reset();
 		}
 	}
 
@@ -249,16 +265,16 @@ void DataMaskRenderAreaComponent::close_input_dialogs()
 	{
 		const std::lock_guard<std::mutex> lock(openInputMutex);
 		workingSet = std::move(openInputWorkingSet);
-		objectID = openInputObjectID;
-		openInputObjectID = isobus::NULL_OBJECT_ID;
+		objectID = (nullptr != openInputObject) ? openInputObject->get_id() : isobus::NULL_OBJECT_ID;
+		openInputObject.reset();
 	}
 
 	// The callbacks will see the input as ended, so the close messages go out here
 	if (isobus::NULL_OBJECT_ID != objectID)
 	{
 		const auto destination = ownerServer.get_client_control_function_for_working_set(workingSet);
-		ownerServer.send_select_input_object_message(objectID, false, false, destination);
 		ownerServer.send_esc_message(objectID, 0, destination);
+		ownerServer.send_select_input_object_message(objectID, false, false, destination);
 	}
 
 	// 0 = Cancel, the same result JUCE gives a window close or Escape
@@ -271,11 +287,29 @@ void DataMaskRenderAreaComponent::close_input_dialogs()
 	}
 }
 
-void DataMaskRenderAreaComponent::begin_open_input(std::uint16_t objectID)
+void DataMaskRenderAreaComponent::close_replaced_input_dialog(std::shared_ptr<isobus::VirtualTerminalServerManagedWorkingSet> workingSet)
+{
+	std::shared_ptr<isobus::VTObject> openInput;
+	{
+		const std::lock_guard<std::mutex> lock(openInputMutex);
+		if ((nullptr != workingSet) && (openInputWorkingSet == workingSet))
+		{
+			openInput = openInputObject;
+		}
+	}
+
+	// A pool update ends data input only when it replaced the focused object (ISO 11783-6 Table 5)
+	if ((nullptr != openInput) && (openInput != workingSet->get_object_by_id(openInput->get_id())))
+	{
+		close_input_dialogs();
+	}
+}
+
+void DataMaskRenderAreaComponent::begin_open_input(std::shared_ptr<isobus::VTObject> object)
 {
 	const std::lock_guard<std::mutex> lock(openInputMutex);
 	openInputWorkingSet = parentWorkingSet;
-	openInputObjectID = objectID;
+	openInputObject = std::move(object);
 }
 
 bool DataMaskRenderAreaComponent::end_open_input()
@@ -283,8 +317,17 @@ bool DataMaskRenderAreaComponent::end_open_input()
 	const std::lock_guard<std::mutex> lock(openInputMutex);
 	const bool wasOpen = (nullptr != openInputWorkingSet);
 	openInputWorkingSet.reset();
-	openInputObjectID = isobus::NULL_OBJECT_ID;
+	openInputObject.reset();
 	return wasOpen;
+}
+
+void DataMaskRenderAreaComponent::process_deselection_macro(std::shared_ptr<isobus::VTObject> input, std::shared_ptr<isobus::VirtualTerminalServerManagedWorkingSet> workingSet)
+{
+	// After a pool replacement the input is the old pool's object, and its macro IDs may name other macros in the new pool
+	if (input == workingSet->get_object_by_id(input->get_id()))
+	{
+		ownerServer.process_macro(input, isobus::EventID::OnInputFieldDeselection, input->get_object_type(), workingSet);
+	}
 }
 
 void DataMaskRenderAreaComponent::paint(Graphics &g)
@@ -319,6 +362,8 @@ void DataMaskRenderAreaComponent::paintOverChildren(Graphics &g)
 
 void DataMaskRenderAreaComponent::mouseDown(const MouseEvent &event)
 {
+	pressCancelled = false;
+
 	if (nullptr != parentWorkingSet)
 	{
 		// Do a top down search to see if they clicked on some interactable object
@@ -355,6 +400,7 @@ void DataMaskRenderAreaComponent::mouseDown(const MouseEvent &event)
 						{
 							// Set before the macro, which can change the mask and so clear it
 							pressedButtonID = clickedObject->get_id();
+							pressedButtonPoint = { to_pool_coordinate(relativeEvent.mouseDownPosition.x), to_pool_coordinate(relativeEvent.mouseDownPosition.y) };
 						}
 						ownerServer.process_macro(clickedObject, pressed ? isobus::EventID::OnKeyPress : isobus::EventID::OnKeyRelease, isobus::VirtualTerminalObjectType::Button, parentWorkingSet);
 						ownerServer.send_button_activation_message(pressed ? isobus::VirtualTerminalBase::KeyActivationCode::ButtonPressedOrLatched : isobus::VirtualTerminalBase::KeyActivationCode::ButtonUnlatchedOrReleased,
@@ -392,6 +438,7 @@ void DataMaskRenderAreaComponent::mouseDrag(const MouseEvent &event)
 			{
 				show_button_pressed(*this, pressedButtonID, false);
 				pressedButtonID = isobus::NULL_OBJECT_ID;
+				pressCancelled = true;
 				ownerServer.release_held_buttons(true);
 			}
 		}
@@ -405,7 +452,7 @@ void DataMaskRenderAreaComponent::mouseUp(const MouseEvent &event)
 	show_button_pressed(*this, pressedButtonID, false);
 	pressedButtonID = isobus::NULL_OBJECT_ID;
 
-	if (nullptr != parentWorkingSet)
+	if ((!pressCancelled) && (nullptr != parentWorkingSet))
 	{
 		// Do a top down search to see if they clicked on some interactable object
 		auto workingSetObject = std::static_pointer_cast<isobus::WorkingSet>(parentWorkingSet->get_working_set_object());
@@ -428,7 +475,7 @@ void DataMaskRenderAreaComponent::mouseUp(const MouseEvent &event)
 				{
 					case isobus::VirtualTerminalObjectType::Button:
 					{
-						// A press cut off by a mask change is released by release_held_buttons() below
+						// Latchable and disabled Buttons send nothing on release
 						if (releasedButtonID == clickedObject->get_id())
 						{
 							std::uint8_t keyCode = std::static_pointer_cast<isobus::Button>(clickedObject)->get_key_code();
@@ -565,20 +612,20 @@ void DataMaskRenderAreaComponent::mouseUp(const MouseEvent &event)
 								}
 								if (!closedByVT)
 								{
-									ownerServer.send_select_input_object_message(clickedList->get_id(), false, false, ownerServer.get_client_control_function_for_working_set(workingSet));
 									if (0 == result)
 									{
 										ownerServer.send_esc_message(clickedList->get_id(), 0, ownerServer.get_client_control_function_for_working_set(workingSet));
 									}
+									ownerServer.send_select_input_object_message(clickedList->get_id(), false, false, ownerServer.get_client_control_function_for_working_set(workingSet));
 								}
 								workingSet->set_object_focus(isobus::NULL_OBJECT_ID);
 								ownerServer.repaint_on_next_update();
-								ownerServer.process_macro(clickedList, isobus::EventID::OnInputFieldDeselection, isobus::VirtualTerminalObjectType::InputList, workingSet);
+								process_deselection_macro(clickedList, workingSet);
 								inputListModal.reset();
 								repaint();
 							};
 							inputListModal->enterModalState(true, ModalCallbackFunction::create(std::move(resultCallback)), false);
-							begin_open_input(clickedList->get_id());
+							begin_open_input(clickedList);
 							ownerServer.send_select_input_object_message(clickedList->get_id(), true, true, ownerServer.get_client_control_function_for_working_set(parentWorkingSet));
 							if (nullptr != parentWorkingSet)
 							{
@@ -614,9 +661,10 @@ void DataMaskRenderAreaComponent::mouseUp(const MouseEvent &event)
 
 							// A keypad rather than a slider, because an exact value cannot be hit by
 							// dragging a finger, especially over the ranges an input number can have
-							inputNumberKeypad.reset(new NumericKeypadComponent((static_cast<double>(currentRawValue) + clickedNumber->get_offset()) * clickedNumber->get_scale(),
-							                                                   (static_cast<double>(clickedNumber->get_minimum_value()) + clickedNumber->get_offset()) * clickedNumber->get_scale(),
-							                                                   (static_cast<double>(clickedNumber->get_maximum_value()) + clickedNumber->get_offset()) * clickedNumber->get_scale(),
+							const double scale = NumberComponent::get_decimal_scale(clickedNumber->get_scale());
+							inputNumberKeypad.reset(new NumericKeypadComponent((static_cast<double>(currentRawValue) + clickedNumber->get_offset()) * scale,
+							                                                   (static_cast<double>(clickedNumber->get_minimum_value()) + clickedNumber->get_offset()) * scale,
+							                                                   (static_cast<double>(clickedNumber->get_maximum_value()) + clickedNumber->get_offset()) * scale,
 							                                                   clickedNumber->get_number_of_decimals(),
 							                                                   (isobus::LanguageCommandInterface::DecimalSymbols::Comma == ownerServer.get_language_command_interface().get_commanded_decimal_symbol()) ? ',' : '.'));
 
@@ -640,7 +688,7 @@ void DataMaskRenderAreaComponent::mouseUp(const MouseEvent &event)
 									// was typed, or the keypad's rounding to the object's decimals is written back.
 									if ((nullptr != inputNumberKeypad) && inputNumberKeypad->is_edited() && (0 != clickedNumber->get_scale()))
 									{
-										const double rawValue = (inputNumberKeypad->get_value() / clickedNumber->get_scale()) - clickedNumber->get_offset();
+										const double rawValue = (inputNumberKeypad->get_value() / NumberComponent::get_decimal_scale(clickedNumber->get_scale())) - clickedNumber->get_offset();
 										const double clamped = std::min(std::max(rawValue, static_cast<double>(clickedNumber->get_minimum_value())),
 										                                static_cast<double>(clickedNumber->get_maximum_value()));
 										inputNumberListener.set_last_value(static_cast<std::uint32_t>(std::llround(clamped)));
@@ -683,11 +731,6 @@ void DataMaskRenderAreaComponent::mouseUp(const MouseEvent &event)
 								inputNumberKeypad.reset();
 								// On Linux a dialog closed by abort_input() stays drawn until something repaints
 								repaint();
-								if (!closedByVT)
-								{
-									ownerServer.send_select_input_object_message(clickedNumber->get_id(), false, false, ownerServer.get_client_control_function_for_working_set(workingSet));
-								}
-
 								if ((1 == result) && !closedByVT)
 								{
 									if (0xFFFF != varNumID)
@@ -705,11 +748,15 @@ void DataMaskRenderAreaComponent::mouseUp(const MouseEvent &event)
 								{
 									ownerServer.send_esc_message(clickedNumber->get_id(), 0, ownerServer.get_client_control_function_for_working_set(workingSet));
 								}
+								if (!closedByVT)
+								{
+									ownerServer.send_select_input_object_message(clickedNumber->get_id(), false, false, ownerServer.get_client_control_function_for_working_set(workingSet));
+								}
 								workingSet->set_object_focus(isobus::NULL_OBJECT_ID);
-								ownerServer.process_macro(clickedNumber, isobus::EventID::OnInputFieldDeselection, isobus::VirtualTerminalObjectType::InputNumber, workingSet);
+								process_deselection_macro(clickedNumber, workingSet);
 							};
 							inputNumberModal->enterModalState(true, ModalCallbackFunction::create(std::move(resultCallback)), false);
-							begin_open_input(clickedNumber->get_id());
+							begin_open_input(clickedNumber);
 							inputNumberKeypad->grabKeyboardFocus();
 							ownerServer.send_select_input_object_message(clickedNumber->get_id(), true, true, ownerServer.get_client_control_function_for_working_set(parentWorkingSet));
 							if (parentWorkingSet)
@@ -782,20 +829,28 @@ void DataMaskRenderAreaComponent::mouseUp(const MouseEvent &event)
 								}
 							}
 
-							inputStringModal.reset(new AlertWindow("Input String", "Enter a value for this input string, then press OK.", MessageBoxIconType::QuestionIcon));
-							inputStringModal->addTextEditor("Input String", hasStringVariable ? stringVariable->get_value() : clickedString->get_value());
+							std::shared_ptr<isobus::InputAttributes> inputAttributes;
+							auto attributes = clickedString->get_object_by_id(clickedString->get_input_attributes(), parentWorkingSet->get_object_tree());
+
+							if ((nullptr != attributes) && (isobus::VirtualTerminalObjectType::InputAttributes == attributes->get_object_type()))
+							{
+								inputAttributes = std::static_pointer_cast<isobus::InputAttributes>(attributes);
+							}
+
+							// Without the padding, so there is room to type. It is added back on OK.
+							const String currentValue = hasStringVariable ? stringVariable->get_value() : clickedString->get_value();
+							auto filter = new InputStringFilter(currentValue.length(), inputAttributes);
+							inputStringModal.reset(new AlertWindow("Input String", "Enter a value for this input string, then press OK.\n" + filter->get_description(), MessageBoxIconType::QuestionIcon));
+							inputStringModal->addTextEditor("Input String", currentValue.trimEnd());
+							inputStringModal->getTextEditor("Input String")->setInputFilter(filter, true);
 							inputStringModal->addButton("OK", 1);
 							inputStringModal->addButton("Cancel", 0);
 							auto resultCallback = [this, clickedString, stringVariable, workingSet = parentWorkingSet](int result) {
 								const bool closedByVT = !end_open_input();
 
-								if (!closedByVT)
+								if ((0 == result) && !closedByVT)
 								{
-									ownerServer.send_select_input_object_message(clickedString->get_id(), false, false, ownerServer.get_client_control_function_for_working_set(workingSet));
-									if (0 == result)
-									{
-										ownerServer.send_esc_message(clickedString->get_id(), 0, ownerServer.get_client_control_function_for_working_set(workingSet));
-									}
+									ownerServer.send_esc_message(clickedString->get_id(), 0, ownerServer.get_client_control_function_for_working_set(workingSet));
 								}
 
 								if ((1 == result) && !closedByVT)
@@ -831,6 +886,10 @@ void DataMaskRenderAreaComponent::mouseUp(const MouseEvent &event)
 									}
 									needToRepaintActiveArea = true;
 								}
+								if (!closedByVT)
+								{
+									ownerServer.send_select_input_object_message(clickedString->get_id(), false, false, ownerServer.get_client_control_function_for_working_set(workingSet));
+								}
 								inputStringModal.reset();
 								repaint();
 
@@ -838,10 +897,10 @@ void DataMaskRenderAreaComponent::mouseUp(const MouseEvent &event)
 								// keeps re-invoking the touch keyboard on every later tap
 								ServerMainComponent::release_text_input_focus();
 								workingSet->set_object_focus(isobus::NULL_OBJECT_ID);
-								ownerServer.process_macro(clickedString, isobus::EventID::OnInputFieldDeselection, isobus::VirtualTerminalObjectType::InputString, workingSet);
+								process_deselection_macro(clickedString, workingSet);
 							};
 							inputStringModal->enterModalState(true, ModalCallbackFunction::create(std::move(resultCallback)), false);
-							begin_open_input(clickedString->get_id());
+							begin_open_input(clickedString);
 							ownerServer.send_select_input_object_message(clickedString->get_id(), true, true, ownerServer.get_client_control_function_for_working_set(parentWorkingSet));
 							if (parentWorkingSet)
 							{
@@ -856,9 +915,9 @@ void DataMaskRenderAreaComponent::mouseUp(const MouseEvent &event)
 						break;
 				}
 			}
-			ownerServer.release_held_buttons();
 		}
 	}
+	ownerServer.release_held_buttons();
 }
 
 bool DataMaskRenderAreaComponent::needsRepaint() const
@@ -924,17 +983,23 @@ std::shared_ptr<isobus::VTObject> DataMaskRenderAreaComponent::getClickedChildRe
 	}
 	else
 	{
-		// none of the childs of the hidden containers should send clicked events
-		if (isobus::VirtualTerminalObjectType::Container == object->get_object_type() &&
-		    std::static_pointer_cast<const isobus::Container>(object)->get_hidden())
+		const auto type = object->get_object_type();
+
+		// A hidden container's children can't be pressed, and containers and output lists clip the parts outside them
+		if (((isobus::VirtualTerminalObjectType::Container == type) && std::static_pointer_cast<const isobus::Container>(object)->get_hidden()) ||
+		    (((isobus::VirtualTerminalObjectType::Container == type) || (isobus::VirtualTerminalObjectType::OutputList == type)) &&
+		     !isClickWithinBounds(x, y, 0, 0, object->get_width(), object->get_height())))
 		{
 			return nullptr;
 		}
 
-		for (std::uint16_t i = 0; i < object->get_number_children(); i++)
+		// Last child first, because it is drawn on top
+		for (std::uint16_t n = object->get_number_children(); n > 0; n--)
 		{
+			const auto i = static_cast<std::uint16_t>(n - 1);
+
 			// The other items of an Output List aren't on screen, so they can't be pressed
-			if ((isobus::VirtualTerminalObjectType::OutputList == object->get_object_type()) &&
+			if ((isobus::VirtualTerminalObjectType::OutputList == type) &&
 			    (i != OutputListComponent::get_selected_index(*std::static_pointer_cast<isobus::OutputList>(object), parentWorkingSet)))
 			{
 				continue;
