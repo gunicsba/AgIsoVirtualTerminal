@@ -35,7 +35,8 @@ public:
 
 	void close_aborted_input_dialogs();
 
-	void close_input_dialogs();
+	/// @returns The object whose deselection was sent, or NULL_OBJECT_ID
+	std::uint16_t close_input_dialogs();
 
 	void close_replaced_input_dialog(std::shared_ptr<isobus::VirtualTerminalServerManagedWorkingSet> workingSet);
 

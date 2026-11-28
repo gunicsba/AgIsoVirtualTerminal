@@ -154,6 +154,17 @@ public:
 
 	void repaint_on_next_update();
 
+	/// @brief Gives the object the operator touched the focus, as navigating to it does in ISO 11783-6 Table 5
+	/// @param[in] workingSet The working set that owns the object
+	/// @param[in] object The input object, Button or Key that was touched
+	/// @param[in] openForInput True if the object is also opened for data input
+	void focus_touched_object(std::shared_ptr<isobus::VirtualTerminalServerManagedWorkingSet> workingSet, std::shared_ptr<isobus::VTObject> object, bool openForInput);
+
+	/// @brief Removes the focus the operator gave, once its mask or working set is no longer shown
+	/// @param[in] workingSet The working set whose mask was replaced
+	/// @param[in] reportedObjectID An object whose deselection was already sent, or NULL_OBJECT_ID
+	void drop_touched_focus(std::shared_ptr<isobus::VirtualTerminalServerManagedWorkingSet> workingSet, std::uint16_t reportedObjectID);
+
 	void save_settings();
 
 	void show_diagnostics_window();
@@ -201,6 +212,9 @@ public:
 	void apply_window_size_limits();
 
 private:
+	// VT version 3 and prior can't report a Button or Key as selected (ISO 11783-6 4.6.17)
+	bool can_report_focus(std::shared_ptr<isobus::VTObject> object) const;
+
 	enum class CommandIDs : int
 	{
 		NoCommand = 0, /// 0 Is an invalid command ID
@@ -365,6 +379,8 @@ private:
 	std::uint32_t alarmAckKeyMaskId = isobus::NULL_OBJECT_ID;
 	std::map<std::shared_ptr<isobus::VirtualTerminalServerManagedWorkingSet>, std::pair<std::uint16_t, std::uint32_t>> alarmActivationOrder; ///< Active alarm mask and activation number per working set, for priority ties
 	std::shared_ptr<isobus::VirtualTerminalServerManagedWorkingSet> lastDataMaskWorkingSet;
+	std::weak_ptr<isobus::VirtualTerminalServerManagedWorkingSet> touchedFocusWorkingSet; ///< The working set whose focus the operator set
+	std::uint16_t touchedFocusObjectID = isobus::NULL_OBJECT_ID; ///< The object the operator gave the focus
 	std::shared_ptr<isobus::VTObject> soundedAlarmMask;
 	std::uint32_t nextAlarmActivation = 0;
 	int alarmAckKeyCode = juce::KeyPress::escapeKey;

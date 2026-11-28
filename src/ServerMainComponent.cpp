@@ -1372,6 +1372,72 @@ void ServerMainComponent::repaint_on_next_update()
 	needToRepaint = true;
 }
 
+bool ServerMainComponent::can_report_focus(std::shared_ptr<isobus::VTObject> object) const
+{
+	return (nullptr != object) &&
+	  ((versionToReport >= VTVersion::Version4) ||
+	   ((isobus::VirtualTerminalObjectType::Button != object->get_object_type()) && (isobus::VirtualTerminalObjectType::Key != object->get_object_type())));
+}
+
+void ServerMainComponent::focus_touched_object(std::shared_ptr<isobus::VirtualTerminalServerManagedWorkingSet> workingSet, std::shared_ptr<isobus::VTObject> object, bool openForInput)
+{
+	if ((nullptr == workingSet) || (nullptr == object))
+	{
+		return;
+	}
+	const auto destination = get_client_control_function_for_working_set(workingSet);
+	const std::uint16_t previousID = workingSet->get_object_focus();
+	const bool focusMoved = (previousID != object->get_id());
+
+	if (focusMoved && (isobus::NULL_OBJECT_ID != previousID))
+	{
+		const auto previous = workingSet->get_object_by_id(previousID);
+
+		if (can_report_focus(previous))
+		{
+			send_select_input_object_message(previousID, false, false, destination);
+		}
+		workingSet->set_object_focus(isobus::NULL_OBJECT_ID);
+
+		if (nullptr != previous)
+		{
+			process_macro(previous, isobus::EventID::OnInputFieldDeselection, previous->get_object_type(), workingSet);
+		}
+	}
+	workingSet->set_object_focus(object->get_id());
+	touchedFocusWorkingSet = workingSet;
+	touchedFocusObjectID = object->get_id();
+
+	if ((focusMoved || openForInput) && can_report_focus(object))
+	{
+		send_select_input_object_message(object->get_id(), true, openForInput, destination);
+	}
+
+	// Opening an object that already has focus runs no selection macro (ISO 11783-6 Table A.3)
+	if (focusMoved)
+	{
+		process_macro(object, isobus::EventID::OnInputFieldSelection, object->get_object_type(), workingSet);
+	}
+	repaint_on_next_update();
+}
+
+void ServerMainComponent::drop_touched_focus(std::shared_ptr<isobus::VirtualTerminalServerManagedWorkingSet> workingSet, std::uint16_t reportedObjectID)
+{
+	// A focus the working set set with Select Input Object is its own to keep
+	if ((nullptr == workingSet) || (touchedFocusWorkingSet.lock() != workingSet) || (workingSet->get_object_focus() != touchedFocusObjectID))
+	{
+		return;
+	}
+
+	if ((reportedObjectID != touchedFocusObjectID) && can_report_focus(workingSet->get_object_by_id(touchedFocusObjectID)))
+	{
+		send_select_input_object_message(touchedFocusObjectID, false, false, get_client_control_function_for_working_set(workingSet));
+	}
+	workingSet->set_object_focus(isobus::NULL_OBJECT_ID);
+	touchedFocusWorkingSet.reset();
+	touchedFocusObjectID = isobus::NULL_OBJECT_ID;
+}
+
 void ServerMainComponent::LanguageCommandConfigClosed::operator()(int result) const noexcept
 {
 	switch (result)

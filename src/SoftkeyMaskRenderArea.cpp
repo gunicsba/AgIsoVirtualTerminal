@@ -191,6 +191,10 @@ void SoftKeyMaskRenderAreaComponent::mouseDown(const MouseEvent &event)
 			auto relativeEvent = event.getEventRelativeTo(this);
 			auto clickedObject = getClickedChildRecursive(softkeyMask, relativeEvent.getMouseDownX(), relativeEvent.getMouseDownY());
 
+			if ((nullptr != clickedObject) && (isobus::VirtualTerminalObjectType::Key == clickedObject->get_object_type()))
+			{
+				ownerServer.focus_touched_object(parentWorkingSet, clickedObject, false);
+			}
 			ownerServer.process_macro(clickedObject, isobus::EventID::OnKeyPress, isobus::VirtualTerminalObjectType::Key, parentWorkingSet);
 
 			std::uint8_t keyCode = 1;

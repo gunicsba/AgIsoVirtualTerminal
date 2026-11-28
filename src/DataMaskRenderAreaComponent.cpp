@@ -192,7 +192,7 @@ void DataMaskRenderAreaComponent::on_change_active_mask(std::shared_ptr<isobus::
 	// Every repaint comes through here, so only a new mask or working set ends the edit
 	if (maskChanged)
 	{
-		close_input_dialogs();
+		ownerServer.drop_touched_focus(previousWorkingSet, close_input_dialogs());
 	}
 
 	if (isobus::NULL_OBJECT_ID != pressedButtonID)
@@ -258,7 +258,7 @@ void DataMaskRenderAreaComponent::close_aborted_input_dialogs()
 	}
 }
 
-void DataMaskRenderAreaComponent::close_input_dialogs()
+std::uint16_t DataMaskRenderAreaComponent::close_input_dialogs()
 {
 	std::shared_ptr<isobus::VirtualTerminalServerManagedWorkingSet> workingSet;
 	std::uint16_t objectID;
@@ -285,6 +285,7 @@ void DataMaskRenderAreaComponent::close_input_dialogs()
 			dialog->exitModalState(0);
 		}
 	}
+	return objectID;
 }
 
 void DataMaskRenderAreaComponent::close_replaced_input_dialog(std::shared_ptr<isobus::VirtualTerminalServerManagedWorkingSet> workingSet)
@@ -386,6 +387,7 @@ void DataMaskRenderAreaComponent::mouseDown(const MouseEvent &event)
 
 					if (false == clickedButton->get_option(isobus::Button::Options::Disabled))
 					{
+						ownerServer.focus_touched_object(parentWorkingSet, clickedObject, false);
 						const bool latchable = clickedButton->get_option(isobus::Button::Options::Latchable);
 						// Latched is sent as pressed and unlatched as released, with no repeats
 						const bool pressed = (false == latchable) || (false == clickedButton->get_option(isobus::Button::Options::CurrentButtonStateIfLatchable));
@@ -616,22 +618,21 @@ void DataMaskRenderAreaComponent::mouseUp(const MouseEvent &event)
 									{
 										ownerServer.send_esc_message(clickedList->get_id(), 0, ownerServer.get_client_control_function_for_working_set(workingSet));
 									}
-									ownerServer.send_select_input_object_message(clickedList->get_id(), false, false, ownerServer.get_client_control_function_for_working_set(workingSet));
+									// It keeps the focus until the operator touches something else
+									ownerServer.send_select_input_object_message(clickedList->get_id(), true, false, ownerServer.get_client_control_function_for_working_set(workingSet));
 								}
-								workingSet->set_object_focus(isobus::NULL_OBJECT_ID);
+								else
+								{
+									workingSet->set_object_focus(isobus::NULL_OBJECT_ID);
+									process_deselection_macro(clickedList, workingSet);
+								}
 								ownerServer.repaint_on_next_update();
-								process_deselection_macro(clickedList, workingSet);
 								inputListModal.reset();
 								repaint();
 							};
 							inputListModal->enterModalState(true, ModalCallbackFunction::create(std::move(resultCallback)), false);
 							begin_open_input(clickedList);
-							ownerServer.send_select_input_object_message(clickedList->get_id(), true, true, ownerServer.get_client_control_function_for_working_set(parentWorkingSet));
-							if (nullptr != parentWorkingSet)
-							{
-								parentWorkingSet->set_object_focus(clickedObject->get_id());
-							}
-							ownerServer.process_macro(clickedObject, isobus::EventID::OnInputFieldSelection, isobus::VirtualTerminalObjectType::InputList, parentWorkingSet);
+							ownerServer.focus_touched_object(parentWorkingSet, clickedObject, true);
 						}
 					}
 					break;
@@ -750,20 +751,19 @@ void DataMaskRenderAreaComponent::mouseUp(const MouseEvent &event)
 								}
 								if (!closedByVT)
 								{
-									ownerServer.send_select_input_object_message(clickedNumber->get_id(), false, false, ownerServer.get_client_control_function_for_working_set(workingSet));
+									// It keeps the focus until the operator touches something else
+									ownerServer.send_select_input_object_message(clickedNumber->get_id(), true, false, ownerServer.get_client_control_function_for_working_set(workingSet));
 								}
-								workingSet->set_object_focus(isobus::NULL_OBJECT_ID);
-								process_deselection_macro(clickedNumber, workingSet);
+								else
+								{
+									workingSet->set_object_focus(isobus::NULL_OBJECT_ID);
+									process_deselection_macro(clickedNumber, workingSet);
+								}
 							};
 							inputNumberModal->enterModalState(true, ModalCallbackFunction::create(std::move(resultCallback)), false);
 							begin_open_input(clickedNumber);
 							inputNumberKeypad->grabKeyboardFocus();
-							ownerServer.send_select_input_object_message(clickedNumber->get_id(), true, true, ownerServer.get_client_control_function_for_working_set(parentWorkingSet));
-							if (parentWorkingSet)
-							{
-								parentWorkingSet->set_object_focus(clickedObject->get_id());
-							}
-							ownerServer.process_macro(clickedObject, isobus::EventID::OnInputFieldSelection, isobus::VirtualTerminalObjectType::InputNumber, parentWorkingSet);
+							ownerServer.focus_touched_object(parentWorkingSet, clickedObject, true);
 						}
 					}
 					break;
@@ -774,6 +774,7 @@ void DataMaskRenderAreaComponent::mouseUp(const MouseEvent &event)
 
 						if (clickedBool->get_enabled())
 						{
+							ownerServer.focus_touched_object(parentWorkingSet, clickedObject, false);
 							bool hasNumberVariable = false;
 							ownerServer.process_macro(clickedBool, isobus::EventID::OnEntryOfAValue, isobus::VirtualTerminalObjectType::InputBoolean, parentWorkingSet);
 							ownerServer.process_macro(clickedBool, isobus::EventID::OnEntryOfANewValue, isobus::VirtualTerminalObjectType::InputBoolean, parentWorkingSet);
@@ -888,7 +889,8 @@ void DataMaskRenderAreaComponent::mouseUp(const MouseEvent &event)
 								}
 								if (!closedByVT)
 								{
-									ownerServer.send_select_input_object_message(clickedString->get_id(), false, false, ownerServer.get_client_control_function_for_working_set(workingSet));
+									// It keeps the focus until the operator touches something else
+									ownerServer.send_select_input_object_message(clickedString->get_id(), true, false, ownerServer.get_client_control_function_for_working_set(workingSet));
 								}
 								inputStringModal.reset();
 								repaint();
@@ -896,17 +898,16 @@ void DataMaskRenderAreaComponent::mouseUp(const MouseEvent &event)
 								// Make sure no text caret survives the dialog, otherwise Windows
 								// keeps re-invoking the touch keyboard on every later tap
 								ServerMainComponent::release_text_input_focus();
-								workingSet->set_object_focus(isobus::NULL_OBJECT_ID);
-								process_deselection_macro(clickedString, workingSet);
+
+								if (closedByVT)
+								{
+									workingSet->set_object_focus(isobus::NULL_OBJECT_ID);
+									process_deselection_macro(clickedString, workingSet);
+								}
 							};
 							inputStringModal->enterModalState(true, ModalCallbackFunction::create(std::move(resultCallback)), false);
 							begin_open_input(clickedString);
-							ownerServer.send_select_input_object_message(clickedString->get_id(), true, true, ownerServer.get_client_control_function_for_working_set(parentWorkingSet));
-							if (parentWorkingSet)
-							{
-								parentWorkingSet->set_object_focus(clickedObject->get_id());
-							}
-							ownerServer.process_macro(clickedObject, isobus::EventID::OnInputFieldSelection, isobus::VirtualTerminalObjectType::InputString, parentWorkingSet);
+							ownerServer.focus_touched_object(parentWorkingSet, clickedObject, true);
 						}
 					}
 					break;
